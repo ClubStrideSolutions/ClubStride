@@ -4,13 +4,16 @@ import psycopg2
 import psycopg2.extras
 from psycopg2 import sql
 import bcrypt
+import streamlit as st  # Only needed for @st.cache_resource or you can remove if you prefer a different caching approach
 
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# load_dotenv()
 
-DB_URL = os.environ.get("DB_URL")
+# DB_URL = os.environ.get("DB_URL")
+DB_URL = st.secrets["DB_URL"]
+
 if not DB_URL:
     raise ValueError("DB_URL is not set in .env")
     
