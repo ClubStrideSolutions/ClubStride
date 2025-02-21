@@ -1,0 +1,2 @@
+# ClubStride
+Attendance Management
