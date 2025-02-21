@@ -1,0 +1,11 @@
+psycopg2-binary
+bcrypt
+python-dotenv
+streamlit
+streamlit-option-menu
+pymongo
+pygwalker
+streamlit-extras
+sweetviz
+pandas
+python-dateutil

@@ -13,7 +13,7 @@ load_dotenv()
 DB_URL = os.environ.get("DB_URL")
 if not DB_URL:
     raise ValueError("DB_URL is not set in .env")
-
+    
 def get_connection():
     """Create and return a new database connection."""
     print(psycopg2.connect(DB_URL))
