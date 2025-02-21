@@ -2,10 +2,18 @@ import pymongo
 import hashlib
 from datetime import datetime
 import streamlit as st  # Only needed for @st.cache_resource or you can remove if you prefer a different caching approach
+import os
+from dotenv import load_dotenv
+
+load_dotenv() 
+
+# CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
 
 @st.cache_resource
 def connect_to_db():
-    CONNECTION_STRING = "mongodb+srv://javbarrios89:mediasense@clustersense.nh1tclt.mongodb.net/"
+    CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
+
+
     client = pymongo.MongoClient(CONNECTION_STRING)
     db = client["Student_Data"]
     return db

@@ -5,7 +5,14 @@ import psycopg2.extras
 from psycopg2 import sql
 import bcrypt
 
-DB_URL = "postgresql://neondb_owner:npg_Wnoe53VzhGbs@ep-hidden-mud-a6bxzi52-pooler.us-west-2.aws.neon.tech/neondb?sslmode=require"
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DB_URL = os.environ.get("DB_URL")
+if not DB_URL:
+    raise ValueError("DB_URL is not set in .env")
 
 def get_connection():
     """Create and return a new database connection."""
