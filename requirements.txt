@@ -10,3 +10,4 @@ streamlit-extras
 sweetviz
 pandas
 python-dateutil
+mailersend

@@ -51,11 +51,7 @@ def main():
     """
 
     st.markdown(sidebar_style, unsafe_allow_html=True)
-    # control_footer_style = """
-    # <style>
-    #     section[data-testid="stSidebar"] { width: 800 !important; # Set the width to your desired value}
-    # </style>
-    # """
+  
     
     # st.markdown(control_footer_style, unsafe_allow_html=True)
     hide_footer_style = ''' <style>.reportview-container .main footer {visibility: hidden;} '''
@@ -92,8 +88,6 @@ def main():
     if st.session_state.is_admin:
         # Insert "Manage Instructors" right after Admin Login
         menu_options.insert(2, "Manage Instructors")
-        # Insert "Logout Admin" right after that
-        menu_options.insert(3, "Logout Admin")
 
     # -----------------------------
     # Instructor menu additions
@@ -104,11 +98,28 @@ def main():
         menu_options.insert(3, "Manage Students")
         # Also allow them to change password + log out
         menu_options.append("Change My Password")
-        menu_options.append("Logout Instructor")
+        # menu_options.append("Logout Instructor")
 
     # Build the final menu
     with st.sidebar:
         choice = option_menu("Main Menu", menu_options, orientation="vertical")
+        st.write("---")
+          # If user is admin, show Logout Admin button
+        if st.session_state.is_admin:
+            if st.button("Logout Admin"):
+                st.session_state.is_admin = False
+                st.warning("Logged out as admin.")
+                st.rerun()
+
+        # If user is an instructor, show Logout Instructor button
+        if st.session_state.instructor_logged_in:
+            if st.button("Logout Instructor"):
+                st.session_state.instructor_logged_in = False
+                st.session_state.instructor_id = None
+                st.session_state.instructor_role = None
+                st.session_state.instructor_programs = None
+                st.warning("Logged out as instructor.")
+                st.rerun()
 
     # -----------------------------
     # Menu Actions
@@ -118,23 +129,14 @@ def main():
 
     elif choice == "Admin Login":
         admin_login()
+        # st.rerun()
 
     elif choice == "Instructor Login":
         if st.session_state.instructor_logged_in:
             st.info("You are already logged in as an instructor.")
         else:
             page_instructor_login()
-
-    elif choice == "Logout Admin":
-        st.session_state.is_admin = False
-        st.warning("Logged out as admin.")
-
-    elif choice == "Logout Instructor":
-        st.session_state.instructor_logged_in = False
-        st.session_state.instructor_id = None
-        st.session_state.instructor_role = None
-        st.session_state.instructor_programs = None
-        st.warning("Logged out as instructor.")
+            # st.rerun()
 
 
     elif choice == "Manage Instructors":
@@ -152,7 +154,9 @@ def main():
             st.error("You do not have permission to access this feature.")
     elif choice == "Generate Reports":
         # Typically an admin-only feature, but adjust as needed
-        if st.session_state.is_admin:
+        # if st.session_state.is_admin:
+        if st.session_state.is_admin or st.session_state.instructor_logged_in:
+
             page_generate_reports()
         else:
             st.error("You do not have permission to access this feature.")
