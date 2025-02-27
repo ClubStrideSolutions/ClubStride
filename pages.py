@@ -8,7 +8,8 @@ from streamlit_extras.dataframe_explorer import dataframe_explorer
 import streamlit.components.v1 as components
 import sweetviz
 import pandas as pd
-from datetime import datetime, time, date
+from datetime import datetime, time, date,timedelta
+
 
 from instructors_db import (
     initialize_tables,
@@ -34,7 +35,10 @@ from students_db import (
     delete_student_record,
     update_attendance_subdoc,
     fetch_all_attendance_records,
-    update_student_info
+    update_student_info,
+    get_student_count_as_of_last_week,
+    get_attendance_subdocs_in_range,        # newly added
+    get_attendance_subdocs_last_week 
 )
 
 from schedules_db import (
@@ -597,10 +601,11 @@ def show_attendance_logs():
             s_name = doc.get("name", "")
             p_name = doc.get("program_name", "?")
 
-            st.write(
+            st.markdown(
                 f"**Name:** {s_name} | **Program:** {p_name} | **Date:** {date_val} "
                 f"| **Status:** {status_val} | **Comment:** {comment_val}"
             )
+            st.write("---")
             if st.button(f"Edit (Row {idx})"):
                 st.session_state["editing_attendance"] = {
                     "student_id": doc.get("student_id", "?"),
@@ -682,13 +687,169 @@ def show_missed_counts():
     if not data:
         st.info("No missed data found.")
     else:
-        df = pd.DataFrame(data)
-        st.dataframe(df, use_container_width=True)
+        MissedCountsdf = pd.DataFrame(data)
+        MissedCountsdf_output= dataframe_explorer(MissedCountsdf) 
+        MissedCounts_dataframe= pd.DataFrame(MissedCountsdf_output)
+        if MissedCounts_dataframe.empty:
+            st.info("No data selected in the explorer.")
+        else:
+            st.dataframe(MissedCounts_dataframe, use_container_width=True)
+        # st.dataframe(df, use_container_width=True)
 
+def show_last_week_attendance():
+    """
+    Display the logs for the last 7 days only,
+    reusing a similar approach to show_attendance_logs().
+    """
+    if st.session_state["attendance_records"] is None:
+        try:
+            # Use the new function from students_db
+            records = get_attendance_subdocs_last_week()
+
+            # If you're also filtering by instructor's permitted IDs:
+            is_admin = st.session_state.get("is_admin", False)
+            if not is_admin:
+                permitted_ids = st.session_state.get("instructor_program_ids", [])
+                records = [r for r in records if r.get("program_id") in permitted_ids]
+
+            # Optionally label them with program names, similar to show_attendance_logs
+            prog_map = {p["program_id"]: p["program_name"] for p in list_programs()}
+            for r in records:
+                pid = r.get("program_id", 0)
+                r["program_name"] = prog_map.get(pid, f"Program ID={pid}")
+
+            st.session_state["attendance_records"] = records
+
+        except Exception as e:
+            st.error(f"Error: {e}")
+            st.session_state["attendance_records"] = []
+
+    # Now we display them
+    logs = st.session_state["attendance_records"]
+    st.subheader("Attendance from the Last 7 Days")
+    if not logs:
+        st.write("No attendance records found for the last 7 days.")
+    else:
+        for idx, doc in enumerate(logs):
+            att = doc.get("attendance", {})
+            date_val = att.get("date", "")
+            status_val = att.get("status", "")
+            comment_val = att.get("comment", "")
+            s_name = doc.get("name", "")
+            p_name = doc.get("program_name", "?")
+
+            st.write(
+                f"**Name:** {s_name} | **Program:** {p_name} | **Date:** {date_val} "
+                f"| **Status:** {status_val} | **Comment:** {comment_val}"
+            )
+            if st.button(f"Edit (Last7 - Row {idx})"):
+                st.session_state["editing_attendance"] = {
+                    "student_id": doc.get("student_id", "?"),
+                    "old_date": date_val,
+                    "old_status": status_val,
+                    "old_comment": comment_val
+                }
+                st.rerun()
+
+    # If user clicks "Edit", you can reuse the same logic as show_attendance_logs
+    if "editing_attendance" in st.session_state:
+        st.subheader("Edit Attendance Record")
+        record = st.session_state["editing_attendance"]
+
+        st.write(f"**Student ID**: {record['student_id']}")
+        st.write(f"**Original Date**: {record['old_date']}")
+
+        status_options = ["Present", "Late", "Absent"]
+        try:
+            status_index = status_options.index(record["old_status"])
+        except ValueError:
+            status_index = 0
+
+        new_status = st.selectbox("New Status", status_options, index=status_index)
+        new_comment = st.text_input("New Comment", value=record["old_comment"])
+
+        if st.button("Save Changes"):
+            try:
+                updated = update_attendance_subdoc(
+                    student_id=record["student_id"],
+                    old_date=record["old_date"],
+                    new_status=new_status,
+                    new_comment=new_comment
+                )
+                if updated:
+                    st.success("Attendance updated successfully!")
+                    # Force refetch
+                    st.session_state["attendance_records"] = None
+                else:
+                    st.warning("No records were updated.")
+            except Exception as e:
+                st.error(f"Error updating attendance: {e}")
+
+            st.session_state.pop("editing_attendance")
+            st.rerun()
 
 def page_review_attendance():
-    st.subheader("Review Attendance Logs")
+    st.header("Review Attendance Logs")
 
+    ############################################
+    # A) Show st.metric for "This Week" vs. "Last Week"
+    ############################################
+    now = datetime.utcnow()
+    seven_days_ago = now - timedelta(days=7)
+    fourteen_days_ago = now - timedelta(days=14)
+
+    # 1) "This Week" = last 7 days
+    subdocs_this_week = get_attendance_subdocs_in_range(seven_days_ago, now)
+    total_this_week = len(subdocs_this_week)
+
+    # 2) "Last Week" = from 14 days ago until 7 days ago
+    subdocs_last_week = get_attendance_subdocs_in_range(fourteen_days_ago, seven_days_ago)
+    total_last_week = len(subdocs_last_week)
+
+    delta_val = total_this_week - total_last_week
+    all_students = get_all_students()
+    total_students = len(all_students)
+
+    # Use our new function to get last week's count from ObjectId logic
+    last_week_count = get_student_count_as_of_last_week()
+
+    # Calculate the difference
+    delta_val = total_students - last_week_count
+
+
+    col1, col2, col3= st.columns(3)
+    with col1:
+        st.metric(
+            label="Attendance This Week",
+            value=total_this_week,
+            delta=f"{delta_val} compared to previous week"
+        )
+
+    # Add a second metric if you want, e.g. "Absent This Week" vs. "Absent Last Week"
+    # We'll count how many in subdocs_this_week have status == "Absent"
+    absent_this_week = sum(1 for r in subdocs_this_week if r["attendance"]["status"] == "Absent")
+    absent_last_week = sum(1 for r in subdocs_last_week if r["attendance"]["status"] == "Absent")
+    delta_absent = absent_this_week - absent_last_week
+    with col2:
+        st.metric(
+            label="Absences This Week",
+            value=absent_this_week,
+            delta=f"{delta_absent} from last week"
+        )
+
+    with col3:
+        st.metric(
+            label="Total Students",
+            value=total_students,
+            delta=f"{delta_val} from last week"
+        )
+
+
+    st.write("---")  # visual separator
+
+    ############################################
+    # B) Original Buttons: Load All, Missed, etc.
+    ############################################
     if "review_mode" not in st.session_state:
         st.session_state["review_mode"] = "none"
 
@@ -698,20 +859,22 @@ def page_review_attendance():
     if "missed_counts" not in st.session_state:
         st.session_state["missed_counts"] = None
 
-    # Show two buttons: "Load All Attendance" or "Load Missed Counts"
-    col1, col2 = st.columns(2)
-    if col1.button("Load All Attendance"):
+    # Show two or three buttons
+    colA, colB = st.columns(2)
+    if colA.button("Load All Attendance"):
         st.session_state["review_mode"] = "attendance"
-        st.session_state["missed_counts"] = None  # Hide or reset missed data
-    if col2.button("Load Missed Counts (All Students)"):
+        st.session_state["attendance_records"] = None
+        st.session_state["missed_counts"] = None
+    if colB.button("Load Missed Counts"):
         st.session_state["review_mode"] = "missed"
-        st.session_state["attendance_records"] = None  # Hide or reset attendance data
+        st.session_state["attendance_records"] = None
+        st.session_state["missed_counts"] = None
 
     # Display whichever mode is selected
     if st.session_state["review_mode"] == "attendance":
-        show_attendance_logs()
+        show_attendance_logs()  # your existing function
     elif st.session_state["review_mode"] == "missed":
-        show_missed_counts()
+        show_missed_counts()    # your existing function
     else:
         st.info("Choose an option to display data.")
         
@@ -720,7 +883,7 @@ def page_review_attendance():
 # PAGE: Generate Reports with Pygwalker
 #####################
 def page_generate_reports():
-    st.header("Generate Reports with Pygwalker")
+    st.header("Generate Reports")
 
     # 1) Determine if user is admin or instructor
     is_admin = st.session_state.get("is_admin", False)
@@ -728,6 +891,7 @@ def page_generate_reports():
     # 2) Build a dict {program_id -> program_name} from Postgres
     all_programs = list_programs()  # e.g. [ {"program_id": 1, "program_name": "STEM"}, ... ]
     prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+        # Get current total
 
     # 3) If instructor, get a list of permitted program IDs
     if is_admin:
