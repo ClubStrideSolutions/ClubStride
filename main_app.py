@@ -22,43 +22,213 @@ from students_db import check_admin
 from instructors_db import create_instructors_table
 
 def admin_login():
+    col_left, col_center, col_right = st.columns([1, 5, 1])
 
-    st.subheader("Admin Login (MongoDB Connection)")
+    with col_center:
+        st.header("Admin Login")
 
-    if st.session_state.get("instructor_logged_in", False):
-        st.error("An instructor is currently logged in. Please log out as instructor before logging in as admin.")
-        return
-    
-    conn_str = st.text_input("MongoDB Connection String", type="password")
-    if st.button("Submit"):
-        if check_admin(conn_str):
-            st.session_state.is_admin = True
-            st.success("Admin access granted!")
-            st.rerun()
-        else:
-            st.error("Invalid connection string. Access denied.")
+
+        if st.session_state.get("instructor_logged_in", False):
+            st.error("An instructor is currently logged in. Please log out as instructor before logging in as admin.")
+            return
+        
+        conn_str = st.text_input("MongoDB Connection String", type="password")
+        if st.button("Submit"):
+            if check_admin(conn_str):
+                st.session_state.is_admin = True
+                st.success("Admin access granted!")
+                st.rerun()
+            else:
+                st.error("Invalid connection string. Access denied.")
 
 def main():
-    st.set_page_config(layout='wide', page_title='Club Stride Software')
-    sidebar_style = """
+    st.set_page_config(layout='wide',page_title='Club Stride Software')
+    medium_layout_css = """
     <style>
-    /* Change the sidebar's overall width */
+    /* Only apply on screens larger than 700px, so it can still shrink on smaller devices */
+    @media (min-width: 700px) {
+        .main .block-container {
+            max-width: 900px !important;  /* Adjust this as desired (e.g., 1000px) */
+            margin: 0 auto;              /* Center horizontally */
+        }
+    }
+    </style>
+    """
+    st.markdown(medium_layout_css, unsafe_allow_html=True)
+    advanced_react_css = """
+    <style>
+    /************************************************
+     0) IMPORT FONTS & GLOBAL RESETS
+    ************************************************/
+    @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Open Sans', sans-serif;
+        margin: 0;
+        padding: 0;
+        scroll-behavior: smooth;
+        transition: all 0.3s ease-in-out;
+    }
+
+    /* Light background for main content area */
+    body {
+        background-color: #FFFFFF !important;  /* White main area */
+        color: #374151; /* Dark gray text color */
+    }
+
+    /************************************************
+     1) MAIN CONTENT FADE-SLIDE IN
+    ************************************************/
+    .main .block-container {
+        animation: fadeSlideIn 0.4s ease-out both;
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+    }
+    @keyframes fadeSlideIn {
+        0% {
+            opacity: 0;
+            transform: translateY(15px);
+        }
+        100% {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    /************************************************
+     2) WIDE SIDEBAR WITH OPENAI-STYLE GRADIENT
+    ************************************************/
     [data-testid="stSidebar"] {
         width: 500px !important;
         min-width: 500px !important;
+        background: linear-gradient(90deg, #8A4FFF 0%, #EC4899 40%, #FF8A00 100%) !important;
+        box-shadow: 1px 0 4px rgba(0, 0, 0, 0.1);
+        border-right: 1px solid rgba(255,255,255,0.2);
+        transition: all 0.3s ease-in-out;
+    }
+
+    /* Subtle hover highlight */
+    [data-testid="stSidebar"]:hover {
+        filter: brightness(1.03);
+    }
+
+    /************************************************
+     3) MOBILE RESPONSIVENESS
+    ************************************************/
+    /* You can remove this media query if you truly never want the sidebar to shrink.
+       But typically, on very small screens, letting the sidebar go 100% wide is friendlier. */
+    @media only screen and (max-width: 600px) {
+        [data-testid="stSidebar"] {
+            position: relative !important;
+            width: 100% !important;
+            min-width: 100% !important;
+            border-right: none;
+            box-shadow: none;
+        }
+    }
+
+    /************************************************
+     4) SCROLLBARS (PURPLE THUMB)
+    ************************************************/
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+        background: #D1D5DB;
+    }
+    ::-webkit-scrollbar-thumb {
+        background-color: #8B5CF6; /* Purple accent */
+        border-radius: 8px;
+        border: 1px solid #D1D5DB;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+        background-color: #6D28D9;
+    }
+
+    /************************************************
+     5) BUTTONS & INTERACTIVE WIDGETS
+    ************************************************/
+    .stButton button, div[role="button"] {
+        background: #FFFFFF !important;
+        color: #374151 !important;
+        border: none !important;
+        border-radius: 4px !important;
+        box-shadow: 0 3px 6px rgba(0,0,0,0.1) !important;
+        transition: all 0.2s ease;
+        font-weight: 600 !important;
+    }
+    .stButton button:hover, div[role="button"]:hover {
+        background: #F3F4F6 !important;
+        transform: translateY(-1px);
+        box-shadow: 0 5px 10px rgba(0,0,0,0.15) !important;
+    }
+    .stButton button:active, div[role="button"]:active {
+        transform: scale(0.98);
+    }
+
+    /* Sliders get a purple handle */
+    [role="slider"] {
+        background-color: #8B5CF6 !important;
+        box-shadow: none !important;
+    }
+
+    /************************************************
+     6) CHECKBOXES & RADIOS
+    ************************************************/
+    input[type="checkbox"], input[type="radio"] {
+        accent-color: #8B5CF6 !important;
+        transform: scale(1.1);
+        cursor: pointer;
+    }
+
+    /************************************************
+     7) HEADERS, TABLES, TEXT SELECTION
+    ************************************************/
+    ::selection {
+        background: #8B5CF6;
+        color: #FFFFFF;
+    }
+    table, th, td {
+        transition: background-color 0.2s;
+    }
+    tbody tr:hover {
+        background-color: rgba(139, 92, 246, 0.05);
+    }
+    h1, h2, h3 {
+        margin-top: 1rem;
+        margin-bottom: 0.5rem;
+        color: #2D3748;
+    }
+
+    /************************************************
+     8) EXPANDER ANIMATION
+    ************************************************/
+    .st-expanderContent {
+        animation: expandIn 0.3s ease-in-out;
+        transform-origin: top;
+    }
+    @keyframes expandIn {
+        0% {
+            max-height: 0;
+            opacity: 0;
+        }
+        100% {
+            max-height: 999px;
+            opacity: 1;
+        }
     }
     </style>
     """
 
-    st.markdown(sidebar_style, unsafe_allow_html=True)
-  
+    st.markdown(advanced_react_css, unsafe_allow_html=True)
+
+    # st.markdown(react_like_css, unsafe_allow_html=True)
     
     # st.markdown(control_footer_style, unsafe_allow_html=True)
     hide_footer_style = ''' <style>.reportview-container .main footer {visibility: hidden;} '''
     st.markdown(hide_footer_style, unsafe_allow_html=True)
     hide_menu_style = '''<style> #MainMenu {visibility: hidden;} </style>'''
     st.markdown(hide_menu_style, unsafe_allow_html=True)
-    st.title("Club Stride Attendance System")
     
 
     # Ensure instructors table is created
@@ -102,6 +272,8 @@ def main():
 
     # Build the final menu
     with st.sidebar:
+        st.title("Club Stride Attendance System")
+
         choice = option_menu("Main Menu", menu_options, orientation="vertical")
         st.write("---")
           # If user is admin, show Logout Admin button
@@ -162,18 +334,22 @@ def main():
             st.error("You do not have permission to access this feature.")
 
     elif choice == "Manage Attendance":
-        Attendance_choice = st.radio("Select" , ["Take Attendance", "Review Attendance"],horizontal = True)
-        # Let both admin and instructors do attendance
-        if Attendance_choice == "Take Attendance":
-            if st.session_state.is_admin or st.session_state.instructor_logged_in:
-                page_take_attendance()
-            else:
-                st.error("You do not have permission to access this feature.")
-        elif Attendance_choice == "Review Attendance":
-            if st.session_state.is_admin or st.session_state.instructor_logged_in:
-                page_review_attendance()
-            else:
-                st.error("You do not have permission to access this feature.")
+        col_left, col_center, col_right = st.columns([1, 5, 1])
+
+        with col_center:
+            st.header("Manage Attendance")
+            Attendance_choice = st.radio("Select" , ["Take Attendance", "Review Attendance"],horizontal = True)
+            # Let both admin and instructors do attendance
+            if Attendance_choice == "Take Attendance":
+                if st.session_state.is_admin or st.session_state.instructor_logged_in:
+                    page_take_attendance()
+                else:
+                    st.error("You do not have permission to access this feature.")
+            elif Attendance_choice == "Review Attendance":
+                if st.session_state.is_admin or st.session_state.instructor_logged_in:
+                    page_review_attendance()
+                else:
+                    st.error("You do not have permission to access this feature.")
     
     elif choice == "Change My Password":
         # Must be an instructor

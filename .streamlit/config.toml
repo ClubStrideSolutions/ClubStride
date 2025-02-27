@@ -1,0 +1,24 @@
+[theme]
+# Keep the app in dark mode so neon or bright accents pop
+base = "dark"
+
+# Use a bright, eye-catching accent color for interactive components
+primaryColor = "#04D9FF"
+
+# Dark background for the main page (nearly black with a hint of blue)
+backgroundColor = "#0E0E20"
+
+# Slightly lighter background for containers and the sidebar
+secondaryBackgroundColor = "#1E1E38"
+
+# Softer white text for better legibility on dark backgrounds
+textColor = "#E3E3E3"
+
+# A clean, modern sans-serif font
+font = "sans serif"
+
+[server]
+headless = true
+enableCORS = false
+# (If on Streamlit Cloud, port setting is typically ignored)
+# port = 8501
