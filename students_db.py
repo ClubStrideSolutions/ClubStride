@@ -15,7 +15,6 @@ def connect_to_db():
     # CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
     CONNECTION_STRING = st.secrets["CONNECTION_STRING"]
 
-
     client = pymongo.MongoClient(CONNECTION_STRING)
     db = client["Student_Data"]
     return db

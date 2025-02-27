@@ -464,8 +464,8 @@ def main():
      2) WIDE SIDEBAR WITH OPENAI-STYLE GRADIENT
     ************************************************/
     [data-testid="stSidebar"] {
-        width: 400px !important;
-        min-width: 400px !important;
+        width: 300px !important;
+        min-width: 300px !important;
         background: linear-gradient(90deg, #8A4FFF 0%, #EC4899 40%, #FF8A00 100%) !important;
         box-shadow: 1px 0 4px rgba(0, 0, 0, 0.1);
         border-right: 1px solid rgba(255,255,255,0.2);
@@ -711,7 +711,7 @@ def main():
 
     else:
         # Fallback if something unexpected
-        st.write("Welcome! Select an option from the sidebar.")
+        st.write("Welcome! Select an option from the side.")
 
 if __name__ == "__main__":
     main()
