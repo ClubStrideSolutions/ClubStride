@@ -1,4 +1,5 @@
 
+# students_db.py
 import os
 import hashlib
 import pymongo
@@ -9,7 +10,8 @@ from dotenv import load_dotenv
 from mailersend import emails
 from bson import ObjectId
 
-# load_dotenv()
+
+load_dotenv()
 
 @st.cache_resource
 def connect_to_db():
@@ -404,7 +406,9 @@ def send_missed_alert_email(parent_email: str,
     """
     Sends an absence alert via MailerSend.
     """
-    MAILERSEND_API_KEY = os.environ.get("MAILERSEND_API_KEY")
+    # MAILERSEND_API_KEY = os.environ.get("MAILERSEND_API_KEY")
+    MAILERSEND_API_KEY = st.secrets["MAILERSEND_API_KEY"]
+
     mailer = emails.NewEmail(MAILERSEND_API_KEY)
     mail_body = {}
 

@@ -18,7 +18,7 @@ textColor = "#E3E3E3"
 font = "sans serif"
 
 [server]
-headless = true
-enableCORS = false
+#headless = true
+#enableCORS = false
 # (If on Streamlit Cloud, port setting is typically ignored)
 # port = 8501

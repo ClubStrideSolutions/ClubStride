@@ -222,6 +222,9 @@ def page_instructor_login():
 
 
                 st.success(f"Welcome, {username}! Role = {result['role']}")
+                st.session_state.menu_choice = "Main Tools"
+
+                st.rerun() 
             else:
                 st.error("Invalid username or password.")
 
@@ -283,7 +286,7 @@ def page_manage_students():
         all_students = get_all_students()  # from Mongo
         if not all_students:
             st.info("No students in the database.")
-            return
+            # return
 
         # ---------------------------
         # 2) If admin, show all; else filter by numeric program_id
@@ -295,93 +298,11 @@ def page_manage_students():
             print(permitted_ids)
             students = [s for s in all_students if s.get("program_id") in permitted_ids]
 
-        if not students:
-            st.info("No students found for your assigned programs.")
-            return
+        # if not students:
+        #     st.info("No students found for your assigned programs.")
+        #     # return
 
-        with st.expander("Current Students", expanded=True):
-        # st.subheader("Current Students")
-
-        # ---------------------------
-        # 3) Display each student
-        # ---------------------------
-            for s in students:
-                student_id = s.get("student_id")
-                name = s.get("name", "")
-                phone = s.get("phone", "")
-                contact_email = s.get("contact_email", "")
-                parent_email = s.get("parent_email", "")
-                prog_id = s.get("program_id", None)  # numeric program ID
-
-                st.write(
-                    f"**Name:** {name}, **ID:** {student_id}, **Program ID:** {prog_id}, "
-                    f"**Phone:** {phone}, **Contact:** {contact_email}, **Parent:** {parent_email}"
-                )
-
-                col_del, col_edit = st.columns(2)
-                with col_del:
-                    if st.button(f"Delete (ID={student_id})", key=f"btn_delete_{student_id}"):
-                        # Instructors must only delete if the student's program_id is in permitted_ids
-                        if not is_admin:
-                            permitted_ids = st.session_state.get("instructor_program_ids", [])
-                            if prog_id not in permitted_ids:
-                                st.error("You are not permitted to delete students in this program.")
-                                st.stop()
-
-                        success = delete_student_record(student_id)
-                        if success:
-                            st.success(f"Deleted student {name} (ID={student_id}).")
-                            st.rerun()
-                        else:
-                            st.error("Delete failed or no such student.")
-
-                with col_edit:
-                    if st.button(f"Edit (ID={student_id})", key=f"btn_edit_{student_id}"):
-                        st.session_state["editing_student"] = {
-                            "student_id": student_id,
-                            "name": name,
-                            "phone": phone,
-                            "contact_email": contact_email,
-                            "parent_email": parent_email,
-                            # We'll store program_id here in case we want to display or verify it
-                            "program_id": prog_id
-                        }
-                        st.rerun()
-
-            # ---------------------------
-            # 4) If we clicked Edit, show form
-            # ---------------------------
-            if "editing_student" in st.session_state:
-                editing_data = st.session_state["editing_student"]
-                st.subheader(f"Edit Student Record (ID={editing_data['student_id']})")
-
-                with st.form("edit_student_form"):
-                    new_name = st.text_input("Name", value=editing_data["name"])
-                    new_phone = st.text_input("Phone", value=editing_data["phone"])
-                    new_contact_email = st.text_input("Contact Email", value=editing_data["contact_email"])
-                    new_parent_email = st.text_input("Parent Email", value=editing_data["parent_email"])
-
-                    submitted_edit = st.form_submit_button("Save Changes")
-                    if submitted_edit:
-                        updated = update_student_info(
-                            editing_data["student_id"],
-                            new_name,
-                            new_phone,
-                            new_contact_email,
-                            new_parent_email
-                        )
-                        if updated:
-                            st.success(f"Student record updated for {new_name}.")
-                        else:
-                            st.warning("No changes made or update failed.")
-
-                        st.session_state.pop("editing_student")
-                        st.rerun()
-
-            # ---------------------------
-            # 5) Add/Update Students
-            # ---------------------------
-        # st.subheader("Add or Update Students")
+         # st.subheader("Add or Update Students")
         with st.expander("Add or Update Students",expanded=True):
 
             action = st.radio(
@@ -478,6 +399,186 @@ def page_manage_students():
 
                             st.success(f"Bulk upload complete. Successes: {successes}, Failures: {failures}")
                             st.rerun()
+
+        with st.expander("Current Students", expanded=True):
+        # st.subheader("Current Students")
+
+        # ---------------------------
+        # 3) Display each student
+        # ---------------------------
+            for s in students:
+                student_id = s.get("student_id")
+                name = s.get("name", "")
+                phone = s.get("phone", "")
+                contact_email = s.get("contact_email", "")
+                parent_email = s.get("parent_email", "")
+                prog_id = s.get("program_id", None)  # numeric program ID
+
+                st.write(
+                    f"**Name:** {name}, **ID:** {student_id}, **Program ID:** {prog_id}, "
+                    f"**Phone:** {phone}, **Contact:** {contact_email}, **Parent:** {parent_email}"
+                )
+
+                col_del, col_edit = st.columns(2)
+                with col_del:
+                    if st.button(f"Delete (ID={student_id})", key=f"btn_delete_{student_id}"):
+                        # Instructors must only delete if the student's program_id is in permitted_ids
+                        if not is_admin:
+                            permitted_ids = st.session_state.get("instructor_program_ids", [])
+                            if prog_id not in permitted_ids:
+                                st.error("You are not permitted to delete students in this program.")
+                                st.stop()
+
+                        success = delete_student_record(student_id)
+                        if success:
+                            st.success(f"Deleted student {name} (ID={student_id}).")
+                            st.rerun()
+                        else:
+                            st.error("Delete failed or no such student.")
+
+                with col_edit:
+                    if st.button(f"Edit (ID={student_id})", key=f"btn_edit_{student_id}"):
+                        st.session_state["editing_student"] = {
+                            "student_id": student_id,
+                            "name": name,
+                            "phone": phone,
+                            "contact_email": contact_email,
+                            "parent_email": parent_email,
+                            # We'll store program_id here in case we want to display or verify it
+                            "program_id": prog_id
+                        }
+                        st.rerun()
+
+            # ---------------------------
+            # 4) If we clicked Edit, show form
+            # ---------------------------
+            if "editing_student" in st.session_state:
+                editing_data = st.session_state["editing_student"]
+                st.subheader(f"Edit Student Record (ID={editing_data['student_id']})")
+
+                with st.form("edit_student_form"):
+                    new_name = st.text_input("Name", value=editing_data["name"])
+                    new_phone = st.text_input("Phone", value=editing_data["phone"])
+                    new_contact_email = st.text_input("Contact Email", value=editing_data["contact_email"])
+                    new_parent_email = st.text_input("Parent Email", value=editing_data["parent_email"])
+
+                    submitted_edit = st.form_submit_button("Save Changes")
+                    if submitted_edit:
+                        updated = update_student_info(
+                            editing_data["student_id"],
+                            new_name,
+                            new_phone,
+                            new_contact_email,
+                            new_parent_email
+                        )
+                        if updated:
+                            st.success(f"Student record updated for {new_name}.")
+                        else:
+                            st.warning("No changes made or update failed.")
+
+                        st.session_state.pop("editing_student")
+                        st.rerun()
+
+            # ---------------------------
+            # 5) Add/Update Students
+            # ---------------------------
+        # # st.subheader("Add or Update Students")
+        # with st.expander("Add or Update Students",expanded=True):
+
+        #     action = st.radio(
+        #         "Choose method:",
+        #         ["Single Student Entry", "Bulk CSV Upload"],
+        #         horizontal=True
+        #     )
+
+        #     if action == "Single Student Entry":
+        #         # Let user manually add a single student
+        #         with st.form("student_form"):
+        #             name_val = st.text_input("Name *", "")
+        #             phone_val = st.text_input("Phone", "")
+        #             contact_val = st.text_input("Contact Email", "")
+        #             parent_val = st.text_input("Parent Email", "")
+
+        #             if is_admin:
+        #                 # Admin can pick from all existing programs
+        #                 all_programs = list_programs()  # e.g. [{"program_id": 101, "program_name": "STEM"}]
+        #                 if not all_programs:
+        #                     st.warning("No programs found in Postgres.")
+        #                     st.stop()
+
+        #                 # Build a dict { program_id -> program_name }
+        #                 prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+
+        #                 # Let admin pick by name, but we store program_id
+        #                 selected_id = st.selectbox(
+        #                     "Select Program:",
+        #                     options=prog_map.keys(),
+        #                     format_func=lambda pid: f"{pid} - {prog_map[pid]}"
+        #                 )
+        #                 prog_val = selected_id
+
+        #             else:
+        #                 # Instructor picks from assigned program_ids
+        #                 permitted_ids = st.session_state.get("instructor_program_ids", [])
+        #                 if not permitted_ids:
+        #                     st.warning("No assigned programs available.")
+        #                     prog_val = None
+        #                 else:
+        #                     prog_val = st.selectbox(
+        #                         "Select Program ID:",
+        #                         options=permitted_ids,
+        #                         format_func=lambda pid: f"Program ID: {pid}"
+        #                     )
+
+        #             submitted = st.form_submit_button("Save Student Info")
+        #             if submitted:
+        #                 if not name_val.strip():
+        #                     st.error("Name is required.")
+        #                 elif prog_val is None:
+        #                     st.error("No valid program selected.")
+        #                 else:
+        #                     result = store_student_record(name_val, phone_val, contact_val, parent_val, prog_val)
+        #                     st.success(result)
+        #                     st.rerun()
+
+        #     else:
+        #         # 6) Bulk CSV Upload
+        #         uploaded_file = st.file_uploader("Select a CSV file", type=["csv"])
+        #         if uploaded_file:
+        #             df = pd.read_csv(uploaded_file)
+        #             st.write("Preview of data:", df.head())
+        #             required_cols = {"name", "phone", "contact_email", "parent_email", "program_id"}
+        #             if not required_cols.issubset(df.columns):
+        #                 st.error(f"CSV must have columns: {required_cols}")
+        #             else:
+        #                 if st.button("Process CSV"):
+        #                     successes = 0
+        #                     failures = 0
+        #                     for idx, row in df.iterrows():
+        #                         name_val = row["name"]
+        #                         phone_val = row["phone"]
+        #                         contact_val = row["contact_email"]
+        #                         parent_val = row["parent_email"]
+        #                         prog_val = int(row["program_id"])
+
+        #                         # If instructor, ensure this numeric program_id is in permitted_ids
+        #                         if not is_admin:
+        #                             permitted_ids = st.session_state.get("instructor_program_ids", [])
+        #                             if prog_val not in permitted_ids:
+        #                                 st.warning(f"Row {idx}: Program ID '{prog_val}' is not in your assigned list.")
+        #                                 failures += 1
+        #                                 continue
+
+        #                         result_msg = store_student_record(
+        #                             name_val, phone_val, contact_val, parent_val, prog_val
+        #                         )
+        #                         if "New student record" in result_msg or "updated" in result_msg:
+        #                             successes += 1
+        #                         else:
+        #                             failures += 1
+
+        #                     st.success(f"Bulk upload complete. Successes: {successes}, Failures: {failures}")
+        #                     st.rerun()
 
 
 #####################

@@ -1,3 +1,4 @@
+# instructors_db.py
 import psycopg2
 import psycopg2.extras
 from psycopg2 import sql
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 
 # load_dotenv()
 
-#B_URL = os.environ.get("DB_URL")
+# DB_URL = os.environ.get("DB_URL")
 DB_URL= st.secrets["DB_URL"]
 if not DB_URL:
     raise ValueError("DB_URL is not set in .env")
@@ -48,7 +49,7 @@ def create_programs_table():
         """
         CREATE TABLE IF NOT EXISTS programs (
             program_id SERIAL PRIMARY KEY,
-            program_name TEXT NOT NULL
+            program_name TEXT NOT NULL UNIQUE
         );
         """
     )

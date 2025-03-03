@@ -1,6 +1,8 @@
+# main_app.py
 
 import streamlit as st
 from streamlit_option_menu import option_menu
+import streamlit.components.v1 as components
 
 # Page imports (same as before)
 from pages import (
@@ -33,6 +35,8 @@ def admin_login():
             if check_admin(conn_str):
                 st.session_state.is_admin = True
                 st.success("Admin access granted!")
+                st.session_state.menu_choice = "Main Tools"
+
                 st.rerun()
             else:
                 st.error("Invalid connection string. Access denied.")
@@ -40,6 +44,18 @@ def admin_login():
 
 def main():
     st.set_page_config(layout='wide', page_title='Club Stride Software')
+     # 1) Global HTML snippet with a top banner and some styling
+    global_layout_html = """
+    <div style="background: linear-gradient(90deg, #FF6E6E 0%, #FFD36E 100%);
+                padding: 20px; color: white; text-align: center;
+                font-family: sans-serif;">
+      <h1>Club Stride Attendance System</h1>
+    </div>
+    """
+
+    # 2) Inject the HTML using st.components.v1.html
+    #    Note: scrolling=False means we rely on the main page scroll, not an iframe scroll
+    components.html(global_layout_html, height=150, scrolling=False)
 
     # Medium layout hack
     medium_layout_css = """
@@ -245,9 +261,15 @@ def main():
 
     # Sidebar menu
     with st.sidebar:
-        st.title("Club Stride Attendance System")
+        # st.title("Club Stride Attendance System")
 
-        choice = option_menu("Main Menu", menu_options, orientation="vertical")
+        # choice = option_menu("Main Menu", menu_options, orientation="vertical")
+        if "menu_choice" not in st.session_state:
+            st.session_state.menu_choice = "Admin Login"
+
+        choice = option_menu("Main Menu", menu_options, orientation="vertical",
+                     default_index=menu_options.index(st.session_state.menu_choice))
+
 
         st.write("---")
         # Logout admin if applicable
