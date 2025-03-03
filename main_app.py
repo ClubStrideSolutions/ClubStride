@@ -3,6 +3,7 @@
 import streamlit as st
 from streamlit_option_menu import option_menu
 import streamlit.components.v1 as components
+from PIL import Image
 
 # Page imports (same as before)
 from pages import (
@@ -260,7 +261,10 @@ def main():
         menu_options.append("Change My Password")
 
     # Sidebar menu
+    logo = Image.open("assets/Club-Stride-Logo.png")
+
     with st.sidebar:
+        
         # st.title("Club Stride Attendance System")
 
         # choice = option_menu("Main Menu", menu_options, orientation="vertical")
@@ -271,7 +275,9 @@ def main():
                      default_index=menu_options.index(st.session_state.menu_choice))
 
 
-        st.write("---")
+
+        # st.write("---")
+
         # Logout admin if applicable
         if st.session_state.is_admin:
             if st.button("Logout Admin"):
@@ -288,6 +294,10 @@ def main():
                 st.session_state.instructor_programs = None
                 st.warning("Logged out as instructor.")
                 st.rerun()
+        
+        st.write("---")
+
+        st.image(logo, caption="© 2025 Club Stride Inc", use_container_width=True)
 
     # -----------------------------
     # Menu Actions
