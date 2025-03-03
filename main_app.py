@@ -276,7 +276,7 @@ def main():
 
 
 
-        # st.write("---")
+        st.markdown("---")
 
         # Logout admin if applicable
         if st.session_state.is_admin:
@@ -295,9 +295,12 @@ def main():
                 st.warning("Logged out as instructor.")
                 st.rerun()
         
-        st.write("---")
+        col1, col2, col3 = st.columns([1, 5, 1])
+        
+        with col2:
+            st.divider()
 
-        st.image(logo, caption="© 2025 Club Stride Inc", use_container_width=True)
+            st.image(logo, caption="© 2025 Club Stride Inc", use_container_width=True)
 
     # -----------------------------
     # Menu Actions
