@@ -275,8 +275,18 @@ def main():
                      default_index=menu_options.index(st.session_state.menu_choice))
 
 
+        st.sidebar.markdown("### Current Login Status")
 
-        st.markdown("---")
+        if st.session_state.get("is_admin", False):
+            st.sidebar.write("**Admin**")
+        elif st.session_state.get("instructor_logged_in", False):
+            # Optionally show the instructor role or ID if you wish
+            instructor_role = st.session_state.get("instructor_role", "Instructor")
+            instructor_id = st.session_state.get("instructor_id", "Unknown")
+            st.sidebar.write(f"**{instructor_role}** (ID={instructor_id})")
+        else:
+            st.sidebar.write("**No user logged in**")
+        # st.markdown("---")
 
         # Logout admin if applicable
         if st.session_state.is_admin:
@@ -298,17 +308,57 @@ def main():
                 st.rerun()
         
         col1, col2, col3 = st.columns([1, 5, 1])
+
         
         with col2:
             st.divider()
-
             st.image(logo, caption="© 2025 Club Stride Inc", use_container_width=True)
 
     # -----------------------------
     # Menu Actions
     # -----------------------------
     if choice == "Home":
-        st.write('Place Holder')
+        hero_html = """
+            <div style="
+                padding: 2rem; 
+                background: linear-gradient(90deg, #FDE68A 0%, #FCD34D 100%);
+                border-radius: 0.5rem;
+                margin-bottom: 1rem;">
+            <h2 style="
+                margin-bottom: 0.5rem; 
+                font-family: sans-serif;
+                color: #374151;">
+                Welcome to the Club Stride Attendance System!
+            </h2>
+            <p style="
+                margin: 0; 
+                color: #4B5563; 
+                font-size: 1.1rem;">
+                Streamlined attendance tracking, automated notifications, and insightful reporting at your fingertips.
+            </p>
+            </div>
+            """
+        st.markdown(hero_html, unsafe_allow_html=True)
+
+        # Create a 3-column layout highlighting major features
+        col2, col3 = st.columns(2)
+
+        with col2:
+            st.subheader("Effortless Attendance")
+            st.write("""
+            - Mark Present, Late, or Absent  
+            - Bulk check-in for entire classes  
+            - Excuse management via forms
+            """)
+
+        with col3:
+            st.subheader("Powerful Reporting")
+            st.write("""
+            - Real-time attendance metrics  
+            - Missed count summaries  
+            - Exportable data records
+            """)
+        # st.write('Place Holder')
 
     if choice == "Admin Login":
         admin_login()
@@ -382,9 +432,9 @@ def main():
             else:
                 st.error("You do not have permission to access this feature.")
 
-    else:
-        # Fallback if something unexpected
-        st.write("Welcome! Select an option from the side.")
+    # else:
+    #     # Fallback if something unexpected
+    #     st.write("...")
 
 if __name__ == "__main__":
     main()

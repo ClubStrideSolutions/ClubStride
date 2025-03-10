@@ -12,12 +12,12 @@ from bson import ObjectId
 
 from instructors_db import list_programs
 
-load_dotenv()
+# load_dotenv()
 
 @st.cache_resource
 def connect_to_db():
-    CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
-    # CONNECTION_STRING = st.secrets["CONNECTION_STRING"]
+    # CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
+    CONNECTION_STRING = st.secrets["CONNECTION_STRING"]
 
     client = pymongo.MongoClient(CONNECTION_STRING)
     db = client["Student_Data"]
@@ -427,7 +427,9 @@ def send_missed_alert_email(student_email: str,
     """
     Sends an absence alert via MailerSend to the student's email.
     """
-    MAILERSEND_API_KEY = os.environ.get("MAILERSEND_API_KEY")
+    # MAILERSEND_API_KEY = os.environ.get("MAILERSEND_API_KEY")
+    MAILERSEND_API_KEY= st.secrets["MAILERSEND_API_KEY"]
+
     mailer = emails.NewEmail(MAILERSEND_API_KEY)
     mail_body = {}
 
