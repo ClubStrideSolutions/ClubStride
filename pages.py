@@ -9,6 +9,9 @@ import streamlit.components.v1 as components
 import sweetviz
 import pandas as pd
 from datetime import datetime, time, date,timedelta
+from dateutil import parser
+import plotly.express as px
+
 
 
 from instructors_db import (
@@ -31,6 +34,8 @@ from students_db import (
     get_all_students,
     record_student_attendance_in_array,
     get_all_attendance_subdocs,
+    delete_attendance_subdoc,       # <--- Import the new function
+    upsert_attendance_subdoc,    
     get_missed_counts_for_all_students,
     delete_student_record,
     update_attendance_subdoc,
@@ -53,34 +58,33 @@ from schedules_db import (
 # UTILITY: Get permitted program NAMES
 ###################################
 
-def _format_time_12h(time_str: str) -> str:
-    """
-    Convert a HH:MM:SS string (24-hour) to 12-hour format (e.g. "09:00 AM").
-    If it's already invalid or empty, just return the original string.
-    """
-    if not time_str:
-        return ""
-    try:
-        t = datetime.strptime(time_str, "%H:%M:%S").time()
-        return t.strftime("%I:%M %p").lstrip("0")  # remove leading 0 from hour
-    except ValueError:
-        return time_str  # fallback if the string isn't HH:MM:SS
 
-def _format_datetime_12h(dt_value) -> str:
-    """
-    Convert a datetime object (or string) to "MM/DD/YYYY hh:mm AM/PM".
-    If None or invalid, returns an empty string or fallback.
-    """
-    if not dt_value:
-        return ""
-    # If it's a string, parse it
-    if isinstance(dt_value, str):
-        try:
-            dt_value = parser.parse(dt_value)
-        except Exception:
-            return dt_value
+import streamlit as st
+from datetime import datetime, time, date
 
-    return dt_value.strftime("%m/%d/%Y %I:%M %p").replace(" 0", " ")
+def _format_time_12h(t):
+    """
+    Safely handle both a time object and a "HH:MM:SS" string.
+    Returns a 12-hour formatted string like "9:00 AM".
+    """
+    from datetime import time
+
+    if isinstance(t, str):
+        # Parse "HH:MM:SS" (or "HH:MM") into a time object
+        parts = t.split(":")
+        if len(parts) == 2:
+            hours, minutes = int(parts[0]), int(parts[1])
+            seconds = 0
+        else:
+            hours, minutes, seconds = int(parts[0]), int(parts[1]), int(parts[2])
+        t_obj = time(hours, minutes, seconds)
+        return t_obj.strftime("%I:%M %p").lstrip("0")
+    elif isinstance(t, time):
+        # Already a time object
+        return t.strftime("%I:%M %p").lstrip("0")
+    else:
+        # If it's not a str or time, just return it as-is or handle error
+        return str(t)
 
 def get_permitted_program_names():
     """
@@ -99,92 +103,134 @@ def get_permitted_program_names():
 def page_manage_instructors():
     st.header("Manage Instructors - Normalized Programs")
     initialize_tables()
+    Programs_Col, Instructors_Col = st.columns([2,2])
+    with Programs_Col:
+        with st.expander("Add a New Program"):
+        # st.subheader("Add a New Program")
+            with st.form("add_program_form"):
+                # new_prog_name = st.text_input("New Program Name", "")
+                new_prog_name = st.text_input("New Program Name", value="") #, key="prog_name_field"
 
-    st.subheader("Add a New Program")
-    new_prog_name = st.text_input("New Program Name", "")
-    if st.button("Create Program"):
-        if new_prog_name.strip():
-            program_id = add_program(new_prog_name.strip())
-            if program_id == -1:
-                st.error("A program with that name already exists.")
-            else:
-                st.success(f"Program created (ID={program_id}).")
-        else:
-            st.warning("Program name cannot be empty.")
+                submitted_prog = st.form_submit_button("Create Program")
 
-    st.subheader("Add a New Instructor")
-    uname = st.text_input("Username", key="uname")
-    pwd = st.text_input("Password", type="password", key="pwd")
-    role = st.selectbox("Role", ["Instructor", "Manager", "Admin"], key="role_select")
-    if st.button("Create Instructor", key="create_instructor"):
-        success = add_instructor(uname, pwd, role)
-        if success:
-            st.success("Instructor created successfully!")
-        else:
-            st.error("User might already exist or an error occurred.")
+            if submitted_prog:#st.button("Create Program"):
+                if new_prog_name.strip():
+                    program_id = add_program(new_prog_name.strip())
+                    if program_id == -1:
+                        st.error("A program with that name already exists.")
+                    else:
+                        st.success(f"Program created (ID={program_id}).")
+                        # st.session_state["prog_name_field"] = ""
 
-    st.subheader("Current Instructors")
+                        
+                        st.rerun()
+                else:
+                    st.warning("Program name cannot be empty.")
+    with Instructors_Col:
+        with st.expander("Add a New Instructor"):
+        # st.subheader("Add a New Instructor")
+            with st.form("add_instructor_form"):
+
+                uname = st.text_input("Username") #, key="uname"
+                pwd = st.text_input("Password", type="password") #, key="pwd"
+                role = st.selectbox("Role", ["Instructor", "Manager", "Admin"]) #, key="role_select"
+                submitted = st.form_submit_button("Create Instructor")
+
+            if submitted:#st.button("Create Instructor", key="create_instructor"):
+                success = add_instructor(uname, pwd, role)
+                if success:
+                    st.success("Instructor created successfully!")
+                    st.rerun()
+                    
+                else:
+                    st.error("User might already exist or an error occurred.")
+
+        # st.subheader("Current Instructors")
+
     instructors = list_instructors()
     if not instructors:
         st.info("No instructors found.")
-        return
+        st.stop()
 
     all_programs = list_programs()
     prog_dict = {p["program_id"]: p["program_name"] for p in all_programs}
-
+    st.subheader("Current Instructors")
     for instr in instructors:
-        st.write("---")
-        st.write(
-            f"**ID:** {instr['instructor_id']} "
-            f"| **Username:** {instr['username']} "
-            f"| **Role:** {instr['role']}"
-        )
-        colA, colB, colC = st.columns([2,2,1])
-        with colA:
-            new_role = st.selectbox(
-                f"Update Role (ID={instr['instructor_id']})",
-                ["Instructor", "Manager", "Admin"],
-                index=["Instructor", "Manager", "Admin"].index(instr["role"]),
-                key=f"role_{instr['instructor_id']}"
-            )
-            if st.button(f"Set Role - {instr['instructor_id']}", key=f"btn_role_{instr['instructor_id']}"):
-                update_instructor_role(instr["instructor_id"], new_role)
-                st.rerun()
+        instr_id = instr["instructor_id"]
+        username = instr["username"]
+        role = instr["role"]
 
-        with colB:
-            assigned = list_instructor_programs(instr["instructor_id"])
-            assigned_str = ", ".join([f"{a['program_name']} (ID={a['program_id']})" for a in assigned]) or "None"
-            st.write(f"**Assigned Programs**: {assigned_str}")
-            selectable_ids = [p["program_id"] for p in all_programs]
-            label_dict = {p["program_id"]: p["program_name"] for p in all_programs}
-            choice = st.selectbox(
-                f"Add Program to (ID={instr['instructor_id']})",
-                options=selectable_ids,
-                format_func=lambda x: label_dict[x],
-                key=f"addprog_{instr['instructor_id']}"
-            )
-            if st.button(f"Assign Program - {instr['instructor_id']}", key=f"btn_assign_{instr['instructor_id']}"):
-                assign_instructor_to_program(instr["instructor_id"], choice)
-                st.success(f"Assigned Program ID={choice} to Instructor ID={instr['instructor_id']}")
-                st.rerun()
-
-        with colC:
-            if st.button(f"Delete (ID={instr['instructor_id']})", key=f"btn_delete_{instr['instructor_id']}"):
-                success = delete_instructor(instr["instructor_id"])
+        # Wrap each instructor’s controls in a collapsible expander
+        with st.expander(f"{username} (ID={instr_id} | Role={role})"):
+            # st.write(f"{username} (ID={instr_id} | Role={role})")
+            
+            # 1. Role Update
+            st.write("### Update Role")
+            col_role, col_mid, col_out = st.columns([3,1,1])
+            
+            with col_role:
+                new_role = st.selectbox(
+                    label="Select New Role",
+                    options=["Instructor", "Manager", "Admin"],
+                    index=["Instructor", "Manager", "Admin"].index(role),
+                    key=f"role_{instr_id}"
+                )
+                if st.button("Update Role", key=f"btn_role_{instr_id}"):
+                    update_instructor_role(instr_id, new_role)
+                    st.success(f"Updated role for {username} to {new_role}.")
+                    st.rerun()
+            
+            # with col_delete:
+            if st.button(f"Delete Instructor", key=f"btn_delete_{instr_id}"):
+                success = delete_instructor(instr_id)
                 if success:
-                    st.success(f"Instructor {instr['username']} deleted.")
+                    st.success(f"Instructor {username} deleted.")
                 else:
                     st.error("Delete failed or instructor not found.")
                 st.rerun()
 
-        st.write(f"Remove Program from Instructor {instr['instructor_id']}")
-        for a in assigned:
-            prog_id = a["program_id"]
-            prog_name = a["program_name"]
-            if st.button(f"Remove {prog_name}", key=f"remove_{instr['instructor_id']}_{prog_id}"):
-                remove_instructor_from_program(instr["instructor_id"], prog_id)
-                st.warning(f"Removed {prog_name} from Instructor {instr['username']}")
-                st.rerun()
+            st.write("---")
+            
+            # 2. Assigned Programs
+            st.write("### Assigned Programs")
+            assigned = list_instructor_programs(instr_id)
+
+            if not assigned:
+                st.write("No programs assigned yet.")
+            else:
+                for a in assigned:
+                    prog_id = a["program_id"]
+                    prog_name = a["program_name"]
+
+                    # One row with program label on left, 'Remove' button on right
+                    c1, c2 = st.columns([4,1])
+                    with c1:
+                        st.write(f"- **{prog_name}** (ID={prog_id})")
+                    with c2:
+                        if st.button("Remove", key=f"remove_{instr_id}_{prog_id}"):
+                            remove_instructor_from_program(instr_id, prog_id)
+                            st.warning(f"Removed {prog_name} from {username}")
+                            st.rerun()
+
+            st.write("---")
+            
+            # 3. Assign a New Program
+            col_assign, assign_mid, assign_out = st.columns([3,1,1])
+
+            st.write("### Assign a New Program")
+            with col_assign:
+                selectable_ids = [p["program_id"] for p in all_programs]
+                choice = st.selectbox(
+                    label="Select a Program to Assign",
+                    options=selectable_ids,
+                    format_func=lambda x: prog_dict[x],
+                    key=f"addprog_{instr_id}"
+                )
+                if st.button("Assign Program", key=f"btn_assign_{instr_id}"):
+                    assign_instructor_to_program(instr_id, choice)
+                    st.success(f"Assigned Program {prog_dict[choice]} (ID={choice}) to {username}")
+                    st.rerun()
+
 
 
 #####################
@@ -295,7 +341,7 @@ def page_manage_students():
             students = all_students
         else:
             permitted_ids = st.session_state.get("instructor_program_ids", [])  # numeric IDs
-            print(permitted_ids)
+            # print(permitted_ids)
             students = [s for s in all_students if s.get("program_id") in permitted_ids]
 
         # if not students:
@@ -317,7 +363,9 @@ def page_manage_students():
                     name_val = st.text_input("Name *", "")
                     phone_val = st.text_input("Phone", "")
                     contact_val = st.text_input("Contact Email", "")
-                    parent_val = st.text_input("Parent Email", "")
+                    # parent_val = st.text_input("Parent Email", "")
+                    grade_val = st.text_input("Grade", "")
+                    school_val  = st.text_input("School", "")
 
                     if is_admin:
                         # Admin can pick from all existing programs
@@ -357,17 +405,50 @@ def page_manage_students():
                         elif prog_val is None:
                             st.error("No valid program selected.")
                         else:
-                            result = store_student_record(name_val, phone_val, contact_val, parent_val, prog_val)
+                            result = store_student_record(name_val, phone_val,
+                                                           contact_val, prog_val,
+                                                           grade=grade_val, school=school_val)#parent_val,
                             st.success(result)
                             st.rerun()
 
             else:
                 # 6) Bulk CSV Upload
+                if is_admin:
+                    # Admin can pick from all existing programs
+                    all_programs = list_programs()
+                    if not all_programs:
+                        st.warning("No programs found in Postgres.")
+                        st.stop()
+
+                    # Build a dict { program_id -> program_name }
+                    prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+
+                    selected_prog_id = st.selectbox(
+                        "Select Program for CSV Rows:",
+                        options=prog_map.keys(),
+                        format_func=lambda pid: f"{pid} - {prog_map[pid]}"
+                    )
+                else:
+                    # Instructor picks from assigned program_ids
+                    permitted_ids = st.session_state.get("instructor_program_ids", [])
+                    if not permitted_ids:
+                        st.warning("No assigned programs available.")
+                        st.stop()
+
+                    selected_prog_id = st.selectbox(
+                        "Select Program ID for CSV Rows:",
+                        options=permitted_ids,
+                        format_func=lambda pid: f"Program ID: {pid}"
+                    )
+
                 uploaded_file = st.file_uploader("Select a CSV file", type=["csv"])
                 if uploaded_file:
                     df = pd.read_csv(uploaded_file)
                     st.write("Preview of data:", df.head())
-                    required_cols = {"name", "phone", "contact_email", "parent_email", "program_id"}
+
+                    required_cols = {"First Name","Last Name",
+                                    "Number", "Email",
+                                    "Grade", "School"}# "program_id","parent_email",
                     if not required_cols.issubset(df.columns):
                         st.error(f"CSV must have columns: {required_cols}")
                     else:
@@ -375,23 +456,29 @@ def page_manage_students():
                             successes = 0
                             failures = 0
                             for idx, row in df.iterrows():
-                                name_val = row["name"]
-                                phone_val = row["phone"]
-                                contact_val = row["contact_email"]
-                                parent_val = row["parent_email"]
-                                prog_val = int(row["program_id"])
+                                # name_val = row["name"]
+                                first_name = str(row["First Name"]).strip()
+                                last_name = str(row["Last Name"]).strip()
+                                name_val = f"{first_name} {last_name}".strip()
+
+                                phone_val = row["Number"]
+                                contact_val = row["Email"]
+                                # parent_val = row["parent_email"]
+                                grade_val = row["Grade"]
+                                school_val = row["School"]
+                                # prog_val = int(row["program_id"])
 
                                 # If instructor, ensure this numeric program_id is in permitted_ids
                                 if not is_admin:
                                     permitted_ids = st.session_state.get("instructor_program_ids", [])
-                                    if prog_val not in permitted_ids:
-                                        st.warning(f"Row {idx}: Program ID '{prog_val}' is not in your assigned list.")
+                                    if selected_prog_id not in permitted_ids:
+                                        st.warning(f"Row {idx}: Program ID '{selected_prog_id}' is not in your assigned list.")
                                         failures += 1
                                         continue
 
                                 result_msg = store_student_record(
-                                    name_val, phone_val, contact_val, parent_val, prog_val
-                                )
+                                    name_val, phone_val, contact_val, selected_prog_id, grade_val, school_val) #parent_val
+
                                 if "New student record" in result_msg or "updated" in result_msg:
                                     successes += 1
                                 else:
@@ -411,13 +498,16 @@ def page_manage_students():
                 name = s.get("name", "")
                 phone = s.get("phone", "")
                 contact_email = s.get("contact_email", "")
-                parent_email = s.get("parent_email", "")
+                # parent_email = s.get("parent_email", "")
                 prog_id = s.get("program_id", None)  # numeric program ID
+                grade = s.get("grade", "")
+                school = s.get("school", "")
 
                 st.write(
                     f"**Name:** {name}, **ID:** {student_id}, **Program ID:** {prog_id}, "
-                    f"**Phone:** {phone}, **Contact:** {contact_email}, **Parent:** {parent_email}"
-                )
+                    f"**Phone:** {phone}, **Contact:** {contact_email}, "
+                    f"**Grade:** {grade}, **School:** {school}"
+                ) #**Parent:** {parent_email}
 
                 col_del, col_edit = st.columns(2)
                 with col_del:
@@ -443,9 +533,11 @@ def page_manage_students():
                             "name": name,
                             "phone": phone,
                             "contact_email": contact_email,
-                            "parent_email": parent_email,
+                            # "parent_email": parent_email,
                             # We'll store program_id here in case we want to display or verify it
-                            "program_id": prog_id
+                            "program_id": prog_id,
+                            "grade": grade,
+                            "school": school
                         }
                         st.rerun()
 
@@ -460,8 +552,9 @@ def page_manage_students():
                     new_name = st.text_input("Name", value=editing_data["name"])
                     new_phone = st.text_input("Phone", value=editing_data["phone"])
                     new_contact_email = st.text_input("Contact Email", value=editing_data["contact_email"])
-                    new_parent_email = st.text_input("Parent Email", value=editing_data["parent_email"])
-
+                    # new_parent_email = st.text_input("Parent Email", value=editing_data["parent_email"])
+                    new_grade = st.text_input("Grade", value=editing_data["grade"])
+                    new_school = st.text_input("School", value=editing_data["school"])
                     submitted_edit = st.form_submit_button("Save Changes")
                     if submitted_edit:
                         updated = update_student_info(
@@ -469,7 +562,10 @@ def page_manage_students():
                             new_name,
                             new_phone,
                             new_contact_email,
-                            new_parent_email
+                            new_grade,
+                            new_school
+                            
+                            # new_parent_email
                         )
                         if updated:
                             st.success(f"Student record updated for {new_name}.")
@@ -479,107 +575,6 @@ def page_manage_students():
                         st.session_state.pop("editing_student")
                         st.rerun()
 
-            # ---------------------------
-            # 5) Add/Update Students
-            # ---------------------------
-        # # st.subheader("Add or Update Students")
-        # with st.expander("Add or Update Students",expanded=True):
-
-        #     action = st.radio(
-        #         "Choose method:",
-        #         ["Single Student Entry", "Bulk CSV Upload"],
-        #         horizontal=True
-        #     )
-
-        #     if action == "Single Student Entry":
-        #         # Let user manually add a single student
-        #         with st.form("student_form"):
-        #             name_val = st.text_input("Name *", "")
-        #             phone_val = st.text_input("Phone", "")
-        #             contact_val = st.text_input("Contact Email", "")
-        #             parent_val = st.text_input("Parent Email", "")
-
-        #             if is_admin:
-        #                 # Admin can pick from all existing programs
-        #                 all_programs = list_programs()  # e.g. [{"program_id": 101, "program_name": "STEM"}]
-        #                 if not all_programs:
-        #                     st.warning("No programs found in Postgres.")
-        #                     st.stop()
-
-        #                 # Build a dict { program_id -> program_name }
-        #                 prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
-
-        #                 # Let admin pick by name, but we store program_id
-        #                 selected_id = st.selectbox(
-        #                     "Select Program:",
-        #                     options=prog_map.keys(),
-        #                     format_func=lambda pid: f"{pid} - {prog_map[pid]}"
-        #                 )
-        #                 prog_val = selected_id
-
-        #             else:
-        #                 # Instructor picks from assigned program_ids
-        #                 permitted_ids = st.session_state.get("instructor_program_ids", [])
-        #                 if not permitted_ids:
-        #                     st.warning("No assigned programs available.")
-        #                     prog_val = None
-        #                 else:
-        #                     prog_val = st.selectbox(
-        #                         "Select Program ID:",
-        #                         options=permitted_ids,
-        #                         format_func=lambda pid: f"Program ID: {pid}"
-        #                     )
-
-        #             submitted = st.form_submit_button("Save Student Info")
-        #             if submitted:
-        #                 if not name_val.strip():
-        #                     st.error("Name is required.")
-        #                 elif prog_val is None:
-        #                     st.error("No valid program selected.")
-        #                 else:
-        #                     result = store_student_record(name_val, phone_val, contact_val, parent_val, prog_val)
-        #                     st.success(result)
-        #                     st.rerun()
-
-        #     else:
-        #         # 6) Bulk CSV Upload
-        #         uploaded_file = st.file_uploader("Select a CSV file", type=["csv"])
-        #         if uploaded_file:
-        #             df = pd.read_csv(uploaded_file)
-        #             st.write("Preview of data:", df.head())
-        #             required_cols = {"name", "phone", "contact_email", "parent_email", "program_id"}
-        #             if not required_cols.issubset(df.columns):
-        #                 st.error(f"CSV must have columns: {required_cols}")
-        #             else:
-        #                 if st.button("Process CSV"):
-        #                     successes = 0
-        #                     failures = 0
-        #                     for idx, row in df.iterrows():
-        #                         name_val = row["name"]
-        #                         phone_val = row["phone"]
-        #                         contact_val = row["contact_email"]
-        #                         parent_val = row["parent_email"]
-        #                         prog_val = int(row["program_id"])
-
-        #                         # If instructor, ensure this numeric program_id is in permitted_ids
-        #                         if not is_admin:
-        #                             permitted_ids = st.session_state.get("instructor_program_ids", [])
-        #                             if prog_val not in permitted_ids:
-        #                                 st.warning(f"Row {idx}: Program ID '{prog_val}' is not in your assigned list.")
-        #                                 failures += 1
-        #                                 continue
-
-        #                         result_msg = store_student_record(
-        #                             name_val, phone_val, contact_val, parent_val, prog_val
-        #                         )
-        #                         if "New student record" in result_msg or "updated" in result_msg:
-        #                             successes += 1
-        #                         else:
-        #                             failures += 1
-
-        #                     st.success(f"Bulk upload complete. Successes: {successes}, Failures: {failures}")
-        #                     st.rerun()
-
 
 #####################
 # PAGE: Take Attendance
@@ -587,6 +582,10 @@ def page_manage_students():
 
 def page_take_attendance():
     st.subheader("Take Attendance")
+    attendance_mode = st.radio(
+        "Choose attendance mode:",
+        ["Take Attendance (Today)", "Record Past Session"], horizontal=True
+    )
     is_admin = st.session_state.get("is_admin", False)
 
     # 1) Load all students from Mongo.
@@ -609,52 +608,118 @@ def page_take_attendance():
         st.info("No students found. (Check whether you have assigned programs or student data.)")
         return
 
-    # 4) Build an attendance form
-    with st.form("attendance_form"):
-        attendance_dict = {}
-        for s in students:
-            sid = s.get("student_id")
-            name = s.get("name", "")
-            pid = s.get("program_id", 0)   # numeric program_id from Mongo
+    if attendance_mode == "Take Attendance (Today)":
+        st.subheader("Today’s Attendance")
+        # 4) Build an attendance form
+        with st.form("attendance_form"):
+            attendance_dict = {}
+            for s in students:
+                sid = s.get("student_id")
+                name = s.get("name", "")
+                pid = s.get("program_id", 0)   # numeric program_id from Mongo
 
-            # Look up program name from our dictionary (fallback if not found)
-            prog_name = prog_map.get(pid, f"Program ID={pid}")
+                # Look up program name from our dictionary (fallback if not found)
+                prog_name = prog_map.get(pid, f"Program ID={pid}")
 
-            st.subheader(f"{name} – Program: {prog_name}")
-            status = st.selectbox(
-                "Status",
-                options=["Present", "Late", "Absent"],
-                key=f"{sid}_status"
-            )
-            comment = st.text_input("Comment (Optional)", key=f"{sid}_comment")
+                st.subheader(f"{name} – Program: {prog_name}")
+                status = st.selectbox(
+                    "Status",
+                    options=["Present", "Late", "Absent"],
+                    key=f"{sid}_status"
+                )
+                comment = st.text_input("Comment (Optional)", key=f"{sid}_comment")
 
-            attendance_dict[sid] = {
-                "name": name,
-                "program_id": pid,   # store numeric ID so we can record attendance
-                "status": status,
-                "comment": comment
-            }
+                attendance_dict[sid] = {
+                    "name": name,
+                    "program_id": pid,   # store numeric ID so we can record attendance
+                    "status": status,
+                    "comment": comment
+                }
 
-        submitted = st.form_submit_button("Submit Attendance")
+            submitted = st.form_submit_button("Submit Attendance")
 
-    # 5) Process form submissions
-    if submitted:
-        for sid, data in attendance_dict.items():
-            name = data["name"]
-            prog_id = data["program_id"]
-            status = data["status"]
-            comment = data["comment"]
+        # 5) Process form submissions
+        if submitted:
+            for sid, data in attendance_dict.items():
+                name = data["name"]
+                prog_id = data["program_id"]
+                status = data["status"]
+                comment = data["comment"]
 
-            try:
-                # record_student_attendance_in_array expects (name, program_id, status, comment)
-                result_msg = record_student_attendance_in_array(name, prog_id, status, comment)
-                st.write(f"{name} – Marked {status}: {result_msg}")
-            except Exception as e:
-                st.error(f"Error for {name}: {e}")
+                try:
+                    # record_student_attendance_in_array expects (name, program_id, status, comment)
+                    result_msg = record_student_attendance_in_array(name, prog_id, status, comment)
+                    st.write(f"{name} – Marked {status}: {result_msg}")
+                except Exception as e:
+                    st.error(f"Error for {name}: {e}")
 
-        st.success("All attendance data submitted!")
+            st.success("All attendance data submitted!")
 
+    else:
+        st.subheader("Record Past Session")
+        # 2) Let the user pick the date/time of this past session
+        session_date = st.date_input("Session Date", value=date(2025, 1, 7))
+        session_time = st.time_input("Session Start Time", value=time(9, 0))
+        session_time_past = _format_time_12h(session_time)
+        st.write(f"**Date/Time**: {session_date} → {session_time_past}")
 
+        # Combine them into a single datetime
+        chosen_datetime = datetime.combine(session_date, session_time)
+
+        # 3) (Optional) "Mark All Present" button for the PAST session
+        if "past_defaults" not in st.session_state:
+            st.session_state["past_defaults"] = {}
+
+        if st.button("Mark All Present for Past Session"):
+            for s in students:
+                sid = s.get("student_id")
+                st.session_state["past_defaults"][sid] = "Present"
+            st.rerun()
+
+        # 4) Build the manual form for final attendance
+        with st.form("past_attendance_form"):
+            past_attendance = {}
+            for s in students:
+                sid = s.get("student_id")
+                student_name = s.get("name", "")
+                prog_id = s.get("program_id", 0)
+                program_name = prog_map.get(prog_id, f"ProgID={prog_id}")
+
+                # Default to “Present” if Mark All Present was pressed
+                default_status = st.session_state["past_defaults"].get(sid, "Absent")
+
+                st.write(f"**{student_name}** (Program: {program_name})")
+                status_choice = st.selectbox(
+                    "Status",
+                    ["Present", "Late", "Absent", "Excused"],
+                    index=["Present", "Late", "Absent", "Excused"].index(default_status),
+                    key=f"past_status_{sid}"
+                )
+                comment_val = st.text_input("Comment (Optional)", key=f"past_comment_{sid}")
+
+                past_attendance[sid] = {
+                    "name": student_name,
+                    "program_id": prog_id,
+                    "status": status_choice,
+                    "comment": comment_val
+                }
+
+            # 5) Submit button
+            submitted = st.form_submit_button("Submit Past Attendance")
+        
+        # 6) Process submissions
+        if submitted:
+            for sid, data in past_attendance.items():
+                record_student_attendance_in_array(
+                    name=data["name"],
+                    program_id=data["program_id"],
+                    status=data["status"],
+                    comment=data["comment"],
+                    attendance_date=chosen_datetime  # <— THIS is key
+                )
+            st.success(f"Past attendance recorded for session on {chosen_datetime}!")
+            # Clear any defaults
+            st.session_state["past_defaults"] = {}
 #####################
 # PAGE: Review Attendance
 #####################
@@ -692,66 +757,112 @@ def show_attendance_logs():
     st.subheader("Daily Attendance Logs")
 
     if not logs:
-        st.write("No attendance records found.")
-    else:
-        for idx, doc in enumerate(logs):
-            att = doc.get("attendance", {})
-            date_val = att.get("date", "")
-            status_val = att.get("status", "")
-            comment_val = att.get("comment", "")
-            s_name = doc.get("name", "")
-            p_name = doc.get("program_name", "?")
+        st.info("No attendance records found.")
+        return
+    
+    all_names = sorted({doc.get("name", "Unknown") for doc in logs})
+    selected_name = st.selectbox("Focus on One Student:", options=["All Students"] + all_names)
+    if selected_name != "All Students":
+        logs = [doc for doc in logs if doc.get("name") == selected_name]
 
-            st.markdown(
-                f"**Name:** {s_name} | **Program:** {p_name} | **Date:** {date_val} "
-                f"| **Status:** {status_val} | **Comment:** {comment_val}"
-            )
-            st.write("---")
-            if st.button(f"Edit (Row {idx})"):
-                st.session_state["editing_attendance"] = {
-                    "student_id": doc.get("student_id", "?"),
+
+    global_idx = 0
+
+    for doc in logs:
+        att = doc.get("attendance", {})
+        date_val = att.get("date", "")
+        status_val = att.get("status", "")
+        comment_val = att.get("comment", "")
+        s_name = doc.get("name", "")
+        p_name = doc.get("program_name", "?")
+        student_id = doc.get("student_id", "?")
+
+        st.markdown(
+            f"**Name:** {s_name} | **Program:** {p_name} | **Date:** {date_val} "
+            f"| **Status:** {status_val} | **Comment:** {comment_val}"
+        )
+
+        colB, colC = st.columns([1, 1])
+
+        # DELETE button
+        with colB:
+            if st.button(f"Delete (Row {global_idx})", key=f"delete_{global_idx}"):
+                deleted = delete_attendance_subdoc(student_id, date_val)
+                if deleted:
+                    st.success("Attendance record deleted.")
+                    st.session_state["attendance_records"] = None
+                else:
+                    st.warning("No matching record found.")
+                st.rerun()
+
+        # UPSERT button
+        with colC:
+            if st.button(f"Upsert (Row {global_idx})", key=f"upsert_{global_idx}"):
+                # We store old info in case we want to adjust date or fields
+                st.session_state["upsert_data"] = {
+                    "student_id": student_id,
+                    "student_name": s_name,  # Let's store the name
                     "old_date": date_val,
                     "old_status": status_val,
                     "old_comment": comment_val
                 }
                 st.rerun()
 
-    # 3) If user clicked "Edit", show the form
-    if "editing_attendance" in st.session_state:
-        st.subheader("Edit Attendance Record")
-        record = st.session_state["editing_attendance"]
+        st.write("---")
+        global_idx += 1  # increment so each record has a unique key
 
-        st.write(f"**Student ID**: {record['student_id']}")
-        st.write(f"**Original Date**: {record['old_date']}")
+    # 4) If user clicked "Upsert", show the minimal upsert form
+    if "upsert_data" in st.session_state:
+        record = st.session_state["upsert_data"]
+        st.subheader("Upsert Attendance Record (Create or Update)")
 
-        status_options = ["Present", "Late", "Absent"]
-        try:
-            status_index = status_options.index(record["old_status"])
-        except ValueError:
-            status_index = 0
+        default_dt = record["old_date"]
+        if isinstance(default_dt, str):
+            default_dt = parser.parse(default_dt)
 
-        new_status = st.selectbox("New Status", status_options, index=status_index)
-        new_comment = st.text_input("New Comment", value=record["old_comment"])
+        with st.form("upsert_form"):
+            st.write(f"**Student Name**: {record['student_name']}")
+            st.write(f"**Student ID**: {record['student_id']}")
+            st.write(f"**Existing Date**: {record['old_date']}")
 
-        if st.button("Save Changes"):
+            # Let user pick a new or same date/time
+            new_date = st.date_input("Date", value=default_dt.date())
+            new_time = st.time_input("Time", value=default_dt.time() if default_dt.time() else time(9, 0))
+            combined_dt = datetime.combine(new_date, new_time)
+
+            status_options = ["Present", "Late", "Absent", "Excused"]
+            old_status = record["old_status"]
             try:
-                updated = update_attendance_subdoc(
+                status_index = status_options.index(old_status)
+            except ValueError:
+                status_index = 0
+
+            final_status = st.selectbox("Status", status_options, index=status_index)
+            final_comment = st.text_input("Comment", value=record["old_comment"])
+
+            submitted_upsert = st.form_submit_button("Upsert Attendance")
+            if submitted_upsert:
+                success = upsert_attendance_subdoc(
                     student_id=record["student_id"],
-                    old_date=record["old_date"],
-                    new_status=new_status,
-                    new_comment=new_comment
+                    target_date=combined_dt,
+                    new_status=final_status,
+                    new_comment=final_comment
                 )
-                if updated:
-                    st.success("Attendance updated successfully!")
-                    # Force refetch so we see updated data
+                if success:
+                    st.success(f"Attendance upserted (Date={combined_dt}).")
+                    # If date changed, optionally delete old record
+                    if combined_dt != parser.parse(str(record["old_date"])):
+                        delete_attendance_subdoc(record["student_id"], record["old_date"])
                     st.session_state["attendance_records"] = None
                 else:
-                    st.warning("No records were updated.")
-            except Exception as e:
-                st.error(f"Error updating attendance: {e}")
+                    st.warning("No changes made or upsert failed.")
 
-            # Done editing
-            st.session_state.pop("editing_attendance")
+                st.session_state.pop("upsert_data")
+                st.rerun()
+
+        if st.button("Cancel Upsert"):
+            st.session_state.pop("upsert_data")
+            st.info("Upsert cancelled.")
             st.rerun()
 
 
@@ -1041,6 +1152,128 @@ def page_generate_reports():
         st.info("No valid attendance data to display.")
         return
 
+
+    # st.help("Below are some prebuilt charts on the dataset.")
+    with st.expander("Visualizations of Full Attendance Data"):
+    # 1) Convert 'status' to numeric: Present=1, Late=0.5, Absent=0
+        def status_to_numeric(s):
+            if s == "Present":
+                return 1
+            elif s == "Late":
+                return 0.5
+            else:
+                return 0
+
+        df["attendance_value"] = df["status"].apply(status_to_numeric)
+
+        # 2) Group by program_name -> compute average attendance
+        ranking_df = df.groupby("program_name", as_index=False)["attendance_value"].mean()
+        ranking_df.rename(columns={"attendance_value": "avg_attendance_score"}, inplace=True)
+        ranking_df.sort_values("avg_attendance_score", ascending=False, inplace=True)
+
+        st.subheader("Program Ranking by Average Attendance")
+        st.table(ranking_df)
+
+        # PLOT #1: Bar chart of average attendance by program
+        fig_bar = px.bar(
+            ranking_df,
+            x="program_name",
+            y="avg_attendance_score",
+            title="Average Attendance Score by Program"
+        )
+        # st.plotly_chart(fig_bar, use_container_width=True)
+
+        status_counts = df["status"].value_counts().reset_index()
+        status_counts.columns = ["status", "count"]
+
+        # st.subheader("Proportion of Attendance Statuses")
+        # st.write("A quick look at the distribution of Present, Late, and Absent overall. "
+        #         "Remember that pie charts can be misleading if too many slices are present.")
+        
+        fig_pie = px.pie(
+            status_counts,
+            values="count",
+            names="status",
+            title="Distribution of Attendance Statuses",
+            hole=0.4  # optional "donut" style
+        )
+        fig_pie.update_layout(
+            width=500,   # adjust as needed
+            height=500   # adjust as needed
+        )
+        # st.plotly_chart(fig_pie, use_container_width=True)
+
+        # 3) Time series: overall attendance over time
+        # Ensure df["date"] is properly typed
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        daily_df = df.groupby("date", as_index=False)["attendance_value"].mean()
+
+        fig_line = px.line(
+            daily_df,
+            x="date",
+            y="attendance_value",
+            title="Average Attendance Over Time (All Programs)"
+        )
+        fig_line.update_traces(line=dict(width=4))
+
+        # st.plotly_chart(fig_line, use_container_width=True)
+
+        # 4) Multi-line time series, color-coded by program
+        multi_df = (
+            df.groupby(["date", "program_name"], as_index=False)["attendance_value"]
+                .mean()
+        )
+        fig_multi = px.line(
+            multi_df,
+            x="date",
+            y="attendance_value",
+            color="program_name",
+            title="Attendance Over Time by Program"
+        )
+        fig_multi.update_traces(line=dict(width=3))
+
+        # st.plotly_chart(fig_multi, use_container_width=True)
+
+        # First row: fig_bar (left), fig_pie (right)
+        row1_col1, row1_col2 = st.columns(2)
+
+        with row1_col1:
+            st.subheader("Average Attendance Score by Program")
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        with row1_col2:
+            st.subheader("Proportion of Attendance Statuses")
+            # st.write(
+            #     "A quick look at the distribution of Present, Late, and Absent overall. "
+            #     "Remember that pie charts can be misleading if too many slices are present."
+            # )
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        st.write("---")
+        # Second row: fig_line (left), fig_multi (right)
+        row2_col1, row2_col2 = st.columns(2)
+
+        with row2_col1:
+            st.subheader("Average Attendance Over Time (All Programs)")
+            st.plotly_chart(fig_line, use_container_width=True)
+
+        with row2_col2:
+            st.subheader("Attendance Over Time by Program")
+            st.plotly_chart(fig_multi, use_container_width=True)
+
+
+
+
+        # st.subheader("Histogram of Attendance Values")
+        # st.write("Displays the distribution of numeric attendance values (Present=1, Late=0.5, Absent=0).")
+        # fig_hist = px.histogram(
+        #     df,
+        #     x="attendance_value",
+        #     nbins=30,  # since we effectively have 3 distinct values
+        #     title="Histogram of Attendance Value Distribution"
+        # )
+        # st.plotly_chart(fig_hist, use_container_width=True)
+
     # 7) Let users explore the data with dataframe_explorer
     with st.expander("Data Explorer"):
         explorer_output = dataframe_explorer(df, case=False)
@@ -1051,17 +1284,19 @@ def page_generate_reports():
             st.dataframe(explorer_df, use_container_width=True)
 
     # 8) Visualize with PyGWalker
-    with st.expander("Data Visualizer"):
-        components.html(
-            pyg.to_html(explorer_df, env="Streamlit"),
-            height=1000,
-            scrolling=True
-        )
-
+    try:
+        with st.expander("Data Visualizer"):
+            components.html(
+                pyg.to_html(explorer_df, env="Streamlit"),
+                height=1000,
+                scrolling=True
+            )
+    except Exception as e:
+        st.info("No data selected in the visualizer.")
     # 9) Generate Sweetviz report on the subset (explorer_df)
-    st.subheader("Sweetviz Report")
-    st.write("Generate a Sweetviz report on the data (the explorer results).")
 
+    # After flattening 'df' with attendance data
+    
     if st.button("Generate Sweetviz Report"):
         report = sweetviz.analyze(explorer_df)
         report_name = "sweetviz_report.html"
@@ -1082,9 +1317,6 @@ def page_generate_reports():
 # PAGE: Manage Schedules
 #####################
 
-from dateutil import parser
-from dateutil import parser
-
 
 def page_manage_schedules():
     """
@@ -1092,81 +1324,70 @@ def page_manage_schedules():
     Stores numeric program_id in Mongo, but *displays* times in 12-hour AM/PM.
     """
 
+    instructor_id = st.session_state.get("instructor_id", None)
+    is_admin = st.session_state.get("is_admin", False)
+    if not instructor_id and not is_admin:
+        st.error("You must be logged in as an instructor or admin to manage schedules.")
+        return
 
-    col_left, col_center, col_right = st.columns([1, 5, 1])
-    with col_center:
-        st.header("Manage Class Schedules")
+    # 2) Build a map { program_id -> program_name } from Postgres
+    all_programs = list_programs()  
+    prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
 
-
-        # 1) Check who is logged in
-        instructor_id = st.session_state.get("instructor_id", None)
-        is_admin = st.session_state.get("is_admin", False)
-        if not instructor_id and not is_admin:
-            st.error("You must be logged in as an instructor or admin to manage schedules.")
+    # 3) Determine which program IDs the user can manage
+    if is_admin:
+        program_id_options = list(prog_map.keys())  # admin can see all
+    else:
+        program_id_options = st.session_state.get("instructor_program_ids", [])
+        if not program_id_options:
+            st.warning("You have no assigned programs. Contact an admin for access.")
             return
 
-        # 2) Build a map { program_id -> program_name } from Postgres
-        all_programs = list_programs()  # e.g. [ {"program_id":1, "program_name":"STEM"}, ... ]
-        prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
-
-        # 3) Determine which program IDs the user can manage
-        if is_admin:
-            program_id_options = list(prog_map.keys())  # admin can see all
-        else:
-            program_id_options = st.session_state.get("instructor_program_ids", [])
-            if not program_id_options:
-                st.warning("You have no assigned programs. Contact an admin for access.")
-                return
-
-        # 4) Create New Schedule
-        st.subheader("Create New Schedule")
-
+    # col_left, col_center, col_right = st.columns([1, 5, 1])
+    # with col_center:
+    st.header("Manage Class Schedules")
+    with st.expander("Create a New Schedule", expanded=True):
+        # with st.form("create_schedule_form"):
         if program_id_options:
             selected_prog_id = st.selectbox(
-                "Select Program",
-                options=program_id_options,
-                format_func=lambda pid: prog_map.get(pid, f"Unknown (ID={pid})")
-            )
+            "Select Program",
+            options=program_id_options,
+            format_func=lambda pid: prog_map.get(pid, f"Unknown (ID={pid})"))
         else:
             st.warning("No assigned programs available.")
             return
 
         title = st.text_input("Class Title", "")
+        notes = st.text_area("Additional Notes/Description")
+
         recurrence = st.selectbox(
             "Recurrence",
             ["None", "Weekly", "Monthly"],
             help="Choose 'None' for a one-time class, or 'Weekly/Monthly' for recurring classes."
         )
-        notes = st.text_area("Additional Notes/Description")
 
+        # days_times = []
+        location = ""
         days_times = []
+        start_dt = None
+        end_dt = None
 
         if recurrence == "None":
             # One-time class
             chosen_date = st.date_input("Class Date", value=date.today())
-            start_t = st.time_input("Start Time", value=time(9, 0))
-            end_t = st.time_input("End Time", value=time(10, 0))
+            None_recurrence_timecol1, None_recurrence_timecol2 = st.columns(2)
+            with None_recurrence_timecol1:
+                start_t = st.time_input("Start Time", value=time(9, 0))
+                st.write(f"Selected Start: **{start_t.strftime('%I:%M %p')}**")  # 12-hour display
+            with None_recurrence_timecol2:
+                end_t = st.time_input("End Time", value=time(10, 0))
+                st.write(f"Ends at: **{end_t.strftime('%I:%M %p').lstrip('0')}**")
+
             location = st.text_input("Location (Zoom or Physical Room)")
-
-            if st.button("Create Schedule"):
-                start_dt = datetime.combine(chosen_date, start_t)
-                end_dt = datetime.combine(chosen_date, end_t)
-                doc = {
-                    "instructor_id": instructor_id,
-                    "program_id": selected_prog_id,
-                    "title": title,
-                    "recurrence": "None",
-                    "notes": notes,
-                    "start_datetime": start_dt,  # store as full datetime
-                    "end_datetime": end_dt,
-                    "days_times": [],
-                    "location": location
-                }
-                new_id = create_schedule(doc)
-                st.success(f"Created one-time schedule with ID: {new_id}")
-                st.rerun()
-
+            
+        # elif recurrence == "Weekly":
         else:
+
             # Weekly or Monthly
             st.write("Select multiple days, each with its own time and location.")
             selected_days = st.multiselect(
@@ -1177,8 +1398,12 @@ def page_manage_schedules():
                 st.write(f"**Times/Location for {d}**")
                 col1, col2 = st.columns(2)
                 start_for_day = col1.time_input(f"{d} Start", value=time(9, 0))
-                end_for_day = col1.time_input(f"{d} End", value=time(10, 0))
-                loc_for_day = col2.text_input(f"{d} Location", "", key=f"{d}_loc")
+                col1.write(f"Starts at: **{start_for_day.strftime('%I:%M %p').lstrip('0')}**")
+
+                end_for_day = col2.time_input(f"{d} End", value=time(10, 0))
+                col2.write(f"Ends at: **{end_for_day.strftime('%I:%M %p').lstrip('0')}**")
+
+                loc_for_day = st.text_input(f"{d} Location", "", key=f"{d}_loc")
 
                 days_times.append({
                     "day": d,
@@ -1188,7 +1413,25 @@ def page_manage_schedules():
                     "location": loc_for_day
                 })
 
-            if st.button("Create Schedule"):
+        # submitted = st.form_submit_button("Create Schedule")
+
+        if st.button("Create Schedule"):
+            if recurrence == "None":
+                # build one-time doc
+                start_dt = datetime.combine(chosen_date, start_t)
+                end_dt = datetime.combine(chosen_date, end_t)
+                doc = {
+                    "instructor_id": instructor_id,
+                    "program_id": selected_prog_id,
+                    "title": title,
+                    "recurrence": "None",
+                    "notes": notes,
+                    "start_datetime": start_dt,
+                    "end_datetime": end_dt,
+                    "days_times": [],
+                    "location": location}
+            else:
+            # build weekly/monthly doc
                 doc = {
                     "instructor_id": instructor_id,
                     "program_id": selected_prog_id,
@@ -1199,70 +1442,73 @@ def page_manage_schedules():
                     "start_datetime": None,
                     "end_datetime": None
                 }
-                new_id = create_schedule(doc)
-                st.success(f"Created {recurrence} schedule with ID: {new_id}")
-                st.rerun()
+
+            new_id = create_schedule(doc)
+            st.success(f"Created schedule with ID: {new_id}")
+            st.rerun()
 
         # 5) Show Existing Schedules
-        st.subheader("Existing Schedules")
+    st.subheader("Existing Schedules")
+    
+    # with st.expander("Existing Schedules", expanded=True):
 
-        # If admin wants to see all schedules, they'd omit instructor_id from here
-        all_schedules = list_schedules(instructor_id=instructor_id)
-        if not all_schedules:
-            st.info("No schedules found.")
-            return
+    # If admin wants to see all schedules, they'd omit instructor_id from here
+    all_schedules = list_schedules(instructor_id=instructor_id)
+    if not all_schedules:
+        st.info("No schedules found.")
+        return
 
-        # Filter schedules to only programs the user can manage
-        filtered = [sch for sch in all_schedules if sch.get("program_id") in program_id_options]
-        if not filtered:
-            st.info("No schedules for your assigned programs.")
-            return
+    # Filter schedules to only programs the user can manage
+    filtered = [sch for sch in all_schedules if sch.get("program_id") in program_id_options]
+    if not filtered:
+        st.info("No schedules for your assigned programs.")
+        return
 
-        for sch in filtered:
-            sid = sch["_id"]  # from Mongo
-            pid = sch.get("program_id", None)
-            prog_name = prog_map.get(pid, f"Unknown (ID={pid})")
+    for sch in filtered:
+        sid = sch["_id"]  # from Mongo
+        pid = sch.get("program_id", None)
+        prog_name = prog_map.get(pid, f"Unknown (ID={pid})")
 
-            st.write("---")
-            st.write(f"**Title**: {sch.get('title', '')} | **Program**: {prog_name}")
-            st.write(f"**Recurrence**: {sch.get('recurrence', 'None')}")
-            st.write(f"**Notes**: {sch.get('notes', '')}")
+        st.write("---")
+        st.write(f"**Title**: {sch.get('title', '')} | **Program**: {prog_name}")
+        st.write(f"**Recurrence**: {sch.get('recurrence', 'None')}")
+        st.write(f"**Notes**: {sch.get('notes', '')}")
 
-            if sch.get("recurrence") == "None":
-                # Display start/end in 12-hour format
-                start_text = _format_datetime_12h(sch.get("start_datetime"))
-                end_text = _format_datetime_12h(sch.get("end_datetime"))
-                st.write(f"**Date/Time**: {start_text} → {end_text}")
+        if sch.get("recurrence") == "None":
+            # Display start/end in 12-hour format
+            start_text = _format_time_12h(sch.get("start_datetime"))
+            end_text = _format_time_12h(sch.get("end_datetime"))
+            st.write(f"**Date/Time**: {start_text} → {end_text}")
 
-                if sch.get("location"):
-                    st.write(f"**Location**: {sch['location']}")
-            else:
-                # Recurring
-                dt_list = sch.get("days_times", [])
-                if dt_list:
-                    st.write("**Days/Times**:")
-                    for d_obj in dt_list:
-                        day = d_obj["day"]
-                        s_24 = d_obj["start_time"]  # e.g. "09:00:00"
-                        e_24 = d_obj["end_time"]
-                        # Convert to 12-hour
-                        s_12 = _format_time_12h(s_24)
-                        e_12 = _format_time_12h(e_24)
-                        loc = d_obj.get("location", "")
-                        st.write(f"- {day}: {s_12} → {e_12}, Loc: {loc}")
+            if sch.get("location"):
+                st.write(f"**Location**: {sch['location']}")
+        else:
+            # Recurring
+            dt_list = sch.get("days_times", [])
+            if dt_list:
+                st.write("**Days/Times**:")
+                for d_obj in dt_list:
+                    day = d_obj["day"]
+                    s_24 = d_obj["start_time"]  # e.g. "09:00:00"
+                    e_24 = d_obj["end_time"]
+                    # Convert to 12-hour
+                    s_12 = _format_time_12h(s_24)
+                    e_12 = _format_time_12h(e_24)
+                    loc = d_obj.get("location", "")
+                    st.write(f"- {day}: {s_12} → {e_12}, Loc: {loc}")
 
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button(f"Edit {sid}"):
-                    st.session_state["editing_schedule"] = sid
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(f"Edit {sid}"):
+                st.session_state["editing_schedule"] = sid
+                st.rerun()
+        with col2:
+            if st.button(f"Delete {sid}"):
+                if delete_schedule(sid):
+                    st.success("Schedule deleted.")
                     st.rerun()
-            with col2:
-                if st.button(f"Delete {sid}"):
-                    if delete_schedule(sid):
-                        st.success("Schedule deleted.")
-                        st.rerun()
-                    else:
-                        st.error("Delete failed or no such schedule.")
+                else:
+                    st.error("Delete failed or no such schedule.")
 
         # 6) Edit Form
         editing_id = st.session_state.get("editing_schedule")
@@ -1350,10 +1596,14 @@ def page_manage_schedules():
                         f"{editing_id}_{d}_start",
                         value=default_start
                     )
+                    col_a.write(f"Starts at: **{new_start.strftime('%I:%M %p').lstrip('0')}**")
+
                     new_end = col_a.time_input(
                         f"{editing_id}_{d}_end",
                         value=default_end
                     )
+                    col_a.write(f"Ends at: **{new_end.strftime('%I:%M %p').lstrip('0')}**")
+
                     new_loc = col_b.text_input(
                         f"{editing_id}_{d}_loc",
                         value=default_loc

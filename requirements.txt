@@ -11,3 +11,4 @@ sweetviz
 pandas
 python-dateutil
 mailersend
+plotly

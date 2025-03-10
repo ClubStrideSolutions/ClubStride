@@ -10,13 +10,14 @@ from dotenv import load_dotenv
 from mailersend import emails
 from bson import ObjectId
 
+from instructors_db import list_programs
 
 load_dotenv()
 
 @st.cache_resource
 def connect_to_db():
-    # CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
-    CONNECTION_STRING = st.secrets["CONNECTION_STRING"]
+    CONNECTION_STRING = os.environ.get("CONNECTION_STRING")
+    # CONNECTION_STRING = st.secrets["CONNECTION_STRING"]
 
     client = pymongo.MongoClient(CONNECTION_STRING)
     db = client["Student_Data"]
@@ -87,7 +88,7 @@ def get_student_count_as_of_last_week():
     return count
 
 
-def store_student_record(name, phone, contact_email, parent_email, program_id):
+def store_student_record(name, phone, contact_email, program_id, grade="", school=""): #parent_email
     db = connect_to_db()
     coll = db["Student_Records"]
     student_id = generate_student_id(name, program_id)
@@ -100,8 +101,10 @@ def store_student_record(name, phone, contact_email, parent_email, program_id):
                 "name": name,
                 "phone": phone,
                 "contact_email": contact_email,
-                "parent_email": parent_email,
-                "program_id": program_id
+                # "parent_email": parent_email,
+                "program_id": program_id,
+                "grade": grade,
+                "school": school
             }}
         )
         return f"Student record updated for {name} (ID={student_id})."
@@ -111,10 +114,12 @@ def store_student_record(name, phone, contact_email, parent_email, program_id):
             "name": name,
             "phone": phone,
             "contact_email": contact_email,
-            "parent_email": parent_email,
+            # "parent_email": parent_email,
             "program_id": program_id,
             "attendance": [],
-            "missed_count": 0
+            "missed_count": 0,
+            "grade": grade,
+            "school": school
         }
         coll.insert_one(doc)
         return f"New student record added for {name} (ID={student_id})!"
@@ -237,30 +242,31 @@ def fetch_all_attendance_records():
     ]
     return list(coll.aggregate(pipeline))
 
+from datetime import timedelta
 
-def update_attendance_subdoc(student_id: str, old_date: str, new_status: str, new_comment: str) -> bool:
-    """
-    Update the attendance subdoc where 'date' == old_date for the given student_id.
-    Returns True if a document was updated, False otherwise.
+def update_attendance_subdoc(student_id: str, old_date, new_status: str, new_comment: str) -> bool:
     
-    NOTE: If old_date is stored as an ISO string, parse it carefully.
-          If your date is a real Mongo Date object, consider storing a subdoc '_id' instead.
-    """
     db = connect_to_db()
     coll = db["Student_Records"]
 
-    # Attempt to parse old_date as ISO 8601
-    try:
-        parsed_date = datetime.fromisoformat(old_date)
-    except ValueError:
-        # If that fails, fallback to dateutil
+    # Check and ensure old_date is datetime
+    if isinstance(old_date, str):
         from dateutil import parser
         parsed_date = parser.parse(old_date)
+    elif isinstance(old_date, datetime):
+        parsed_date = old_date
+    else:
+        raise ValueError("old_date must be a datetime object or an ISO-formatted string")
+
+    date_upper_bound = parsed_date + timedelta(milliseconds=1)
 
     result = coll.update_one(
         {
             "student_id": student_id,
-            "attendance.date": parsed_date
+            "attendance.date": {
+                "$gte": parsed_date,
+                "$lt": parsed_date + timedelta(milliseconds=1)
+            }
         },
         {
             "$set": {
@@ -271,9 +277,9 @@ def update_attendance_subdoc(student_id: str, old_date: str, new_status: str, ne
     )
     return result.modified_count > 0
 
-
 def update_student_info(student_id: str, new_name: str, new_phone: str,
-                        new_contact_email: str, new_parent_email: str) -> bool:
+                        new_contact_email: str, new_grade: str, new_school: str) -> bool:
+    # new_parent_email: str
     """
     Update fields of an existing student document by student_id.
     Returns True if an update occurred, False otherwise.
@@ -286,7 +292,9 @@ def update_student_info(student_id: str, new_name: str, new_phone: str,
             "name": new_name,
             "phone": new_phone,
             "contact_email": new_contact_email,
-            "parent_email": new_parent_email
+            # "parent_email": new_parent_email,
+            "grade": new_grade,
+            "school": new_school
         }
     }
 
@@ -294,7 +302,7 @@ def update_student_info(student_id: str, new_name: str, new_phone: str,
     return result.modified_count > 0
 
 
-def record_student_attendance_in_array(name, program_id, status, comment=None):
+def record_student_attendance_in_array(name, program_id, status, comment=None, attendance_date=None):
     db = connect_to_db()
     coll = db["Student_Records"]
     student_id = generate_student_id(name, program_id)
@@ -310,17 +318,21 @@ def record_student_attendance_in_array(name, program_id, status, comment=None):
                 "name": name,
                 "program_id": program_id,
                 "phone": "",
-                "contact_email": "",
-                "parent_email": "",
-                "missed_count": 0
+                "contact_email": "",  # Student's email
+                # "parent_email": "",   # (unused now, but left for reference)
+                "missed_count": 0,
+                "grade": "",        # Optionally you can default them too
+                "school": ""
             }
         },
         upsert=True
     )
-
+    
+    if attendance_date is None:
+        attendance_date = datetime.utcnow()
     # 3) Build attendance sub-doc
     attendance_entry = {
-        "date": datetime.utcnow(),
+        "date": attendance_date,
         "status": status,
         "comment": comment
     }
@@ -337,31 +349,39 @@ def record_student_attendance_in_array(name, program_id, status, comment=None):
     # 5) Retrieve updated doc, possibly send email
     doc = coll.find_one(
         {"student_id": student_id},
-        {"missed_count": 1, "parent_email": 1, "name": 1}
+        # Now fetch contact_email, not parent_email
+        {"missed_count": 1, "contact_email": 1, "name": 1}
     )
     new_missed = doc.get("missed_count", 0)
-    parent_email = doc.get("parent_email", "")
+    student_email = doc.get("contact_email", "")
     student_name = doc.get("name", "")
 
-    # 6) If absent, maybe send email
-    if missed_inc == 1 and parent_email:
-        google_form_link = "https://docs.google.com/forms/..."
+    # 6) If absent, maybe send email to the student
+    
+    if missed_inc == 1 and student_email:
+        program_list = list_programs()
+        prog_map = {p["program_id"]: p["program_name"] for p in program_list}
+        program_name = prog_map.get(program_id, f"Program ID={program_id}")
+        absent_date_str = attendance_date.strftime("%B %d, %Y")  
+        google_form_link = "https://docs.google.com/forms/d/e/1FAIpQLSdeM6AUXXcCK3mNWaCQFrnoc-fmjFC615sh4cMGJ04iLGua1g/viewform?usp=dialog"  # Update your form link
+
+        # Customize the subject/body text as you see fit
         if new_missed == 1:
-            subject = f"1st Absence: {student_name} Missed Today’s Session"
+            subject = f"[1st Absence] {student_name} missed {program_name} on {absent_date_str}"
             body = (
-                "Hello,\n\n"
-                f"We wanted to inform you that your child, {student_name}, missed today's session. "
-                "Please ensure they attend next time. If they had a valid excuse, you can submit it here:\n"
-                f"{google_form_link}\n\n"
+                f"Hello {student_name},\n\n"
+                f"You missed our {program_name} session on {absent_date_str}. "
+                "If you had a valid excuse, please submit it here:\n"
+                f"\n{google_form_link}\n\n"
                 "Thank you,\n"
                 "Club Stride Team"
             )
         elif new_missed == 2:
-            subject = f"2nd Absence: {student_name} Missed Another Session"
+            subject = f"[2nd Absence] {student_name} missed {program_name} again on {absent_date_str}"
             body = (
-                "Hello,\n\n"
-                f"Your child, {student_name}, has now missed two sessions. If they miss one more, "
-                "they may be removed from the program. Please submit an excuse:\n"
+                f"Hello {student_name},\n\n"
+                f"You've now missed two {program_name} sessions. The latest absence was {absent_date_str}..."
+                "If you miss one more, you may be removed from the program. Please submit an excuse:\n"
                 f"{google_form_link}\n\n"
                 "Thank you,\n"
                 "Club Stride Team"
@@ -369,26 +389,27 @@ def record_student_attendance_in_array(name, program_id, status, comment=None):
         elif new_missed == 3:
             subject = f"3rd Absence: {student_name}"
             body = (
-                "Hello,\n\n"
-                f"Your child, {student_name}, has missed three sessions. We will contact you. "
-                "You can still submit an excuse here:\n"
+                f"Hello {student_name},\n\n"
+                f"You have missed three {program_name} sessions. The latest absence was {absent_date_str}..."
+                "We will contact you directly. "
+                "If you had a valid excuse, you can still submit it here:\n"
                 f"{google_form_link}\n\n"
                 "Thank you,\n"
                 "Club Stride Team"
             )
         else:
-            subject = f"{student_name} Has Missed {new_missed} Sessions"
+            subject = f"{student_name} has missed {new_missed} {program_name} sessions"
             body = (
-                "Hello,\n\n"
-                f"Your child, {student_name}, has missed multiple sessions. Please contact us or "
-                "submit an excuse:\n"
-                f"{google_form_link}\n\n"
+                f"Hello {student_name},\n\n"
+                f"You have missed {new_missed} sessions. Please contact us or "
+                f"submit an excuse:\n{google_form_link}\n\n"
                 "Thank you,\n"
                 "Club Stride Team"
             )
 
+        # Now call the email function with the student’s email
         send_missed_alert_email(
-            parent_email=parent_email,
+            student_email=student_email,
             student_name=student_name,
             program_name=program_id,
             subject_line=subject,
@@ -398,17 +419,15 @@ def record_student_attendance_in_array(name, program_id, status, comment=None):
     return f"Updated attendance for student_id={student_id} (status={status})"
 
 
-def send_missed_alert_email(parent_email: str,
+def send_missed_alert_email(student_email: str,
                             student_name: str,
                             program_name: str,
                             subject_line: str,
                             body_text: str):
     """
-    Sends an absence alert via MailerSend.
+    Sends an absence alert via MailerSend to the student's email.
     """
-    # MAILERSEND_API_KEY = os.environ.get("MAILERSEND_API_KEY")
-    MAILERSEND_API_KEY = st.secrets["MAILERSEND_API_KEY"]
-
+    MAILERSEND_API_KEY = os.environ.get("MAILERSEND_API_KEY")
     mailer = emails.NewEmail(MAILERSEND_API_KEY)
     mail_body = {}
 
@@ -417,7 +436,8 @@ def send_missed_alert_email(parent_email: str,
         "email": "javier@clubstride.org"
     }
 
-    recipients = [{"name": parent_email.split('@')[0], "email": parent_email}]
+    # Single recipient is the student
+    recipients = [{"name": student_email.split('@')[0], "email": student_email}]
 
     mailer.set_mail_from(mail_from, mail_body)
     mailer.set_mail_to(recipients, mail_body)
@@ -426,3 +446,83 @@ def send_missed_alert_email(parent_email: str,
 
     response = mailer.send(mail_body)
     print("MailerSend response:", response)
+
+def delete_attendance_subdoc(student_id: str, target_date) -> bool:
+    """
+    Remove an attendance sub-document that matches a specific date.
+    Returns True if a sub-document was actually removed, False otherwise.
+    """
+    db = connect_to_db()
+    coll = db["Student_Records"]
+
+    # If target_date is a string, parse to a datetime
+    if isinstance(target_date, str):
+        from dateutil import parser
+        target_date = parser.parse(target_date)
+    
+    result = coll.update_one(
+        {"student_id": student_id},
+        {
+            # $pull removes array elements that match the query
+            "$pull": {
+                "attendance": {
+                    # We match on exact date/time (to millisecond).
+                    # If your stored times can vary by microseconds, consider a range match.
+                    "date": { 
+                        "$gte": target_date, 
+                        "$lt": target_date + timedelta(milliseconds=1)
+                    }
+                }
+            }
+        }
+    )
+    return result.modified_count > 0
+
+
+def upsert_attendance_subdoc(student_id: str, target_date, new_status: str, new_comment: str = "") -> bool:
+    """
+    Upsert an attendance record on a specific date for this student_id.
+    If the date already exists, we update it. Otherwise, we insert a new sub-doc.
+    
+    Returns True if a sub-document was created or updated, False if nothing changed.
+    """
+    db = connect_to_db()
+    coll = db["Student_Records"]
+
+    # 1) Ensure target_date is a datetime object
+    if isinstance(target_date, str):
+        from dateutil import parser
+        target_date = parser.parse(target_date)
+
+    # 2) Try to update an existing sub-doc
+    result = coll.update_one(
+        {
+            "student_id": student_id,
+            "attendance.date": {
+                "$gte": target_date,
+                "$lt": target_date + timedelta(milliseconds=1)
+            }
+        },
+        {
+            "$set": {
+                "attendance.$.status": new_status,
+                "attendance.$.comment": new_comment
+            }
+        }
+    )
+
+    if result.matched_count > 0:
+        # We found and updated an existing sub-document
+        return result.modified_count > 0
+    else:
+        # 3) If no match, we push a new attendance sub-document
+        attendance_entry = {
+            "date": target_date,
+            "status": new_status,
+            "comment": new_comment
+        }
+        result_push = coll.update_one(
+            {"student_id": student_id},
+            {"$push": {"attendance": attendance_entry}}
+        )
+        return result_push.modified_count > 0

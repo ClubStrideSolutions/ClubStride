@@ -36,8 +36,7 @@ def admin_login():
             if check_admin(conn_str):
                 st.session_state.is_admin = True
                 st.success("Admin access granted!")
-                st.session_state.menu_choice = "Main Tools"
-
+                st.session_state.menu_choice = "Manage Instructors"
                 st.rerun()
             else:
                 st.error("Invalid connection string. Access denied.")
@@ -247,6 +246,7 @@ def main():
     # and adding a single "Main Tools" item in their place.
     # -----------------------------
     menu_options = [
+        "Home",
         "Admin Login",
         "Instructor Login",
         "Main Tools"
@@ -282,6 +282,7 @@ def main():
         if st.session_state.is_admin:
             if st.button("Logout Admin"):
                 st.session_state.is_admin = False
+                st.session_state.menu_choice = "Home"
                 st.warning("Logged out as admin.")
                 st.rerun()
 
@@ -292,6 +293,7 @@ def main():
                 st.session_state.instructor_id = None
                 st.session_state.instructor_role = None
                 st.session_state.instructor_programs = None
+                st.session_state.menu_choice = "Home"
                 st.warning("Logged out as instructor.")
                 st.rerun()
         
@@ -305,6 +307,9 @@ def main():
     # -----------------------------
     # Menu Actions
     # -----------------------------
+    if choice == "Home":
+        st.write('Place Holder')
+
     if choice == "Admin Login":
         admin_login()
 
@@ -371,7 +376,7 @@ def main():
 
         # ----- TAB 4: Generate Reports -----
         with tabs[3]:
-            st.header("Generate Reports")
+            # st.header("Generate Reports")
             if st.session_state.is_admin or st.session_state.instructor_logged_in:
                 page_generate_reports()
             else:
