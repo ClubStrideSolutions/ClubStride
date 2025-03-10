@@ -1018,15 +1018,26 @@ def page_review_attendance():
     subdocs_last_week = get_attendance_subdocs_in_range(fourteen_days_ago, seven_days_ago)
     total_last_week = len(subdocs_last_week)
 
-    delta_val = total_this_week - total_last_week
-    all_students = get_all_students()
+    attendance_delta = total_this_week - total_last_week
+
+    # --- Only fetch students in permitted programs (if instructor) ---
+    is_admin = st.session_state.get("is_admin", False)
+    if is_admin:
+        all_students = get_all_students()  # returns ALL students
+    else:
+        # gather instructor_program_ids from session
+        program_ids = st.session_state.get("instructor_program_ids", [])
+        # fetch only those students in the instructor’s assigned programs
+        all_students = get_all_students(program_ids=program_ids)
+
+    # all_students = get_all_students()
     total_students = len(all_students)
 
     # Use our new function to get last week's count from ObjectId logic
     last_week_count = get_student_count_as_of_last_week()
 
     # Calculate the difference
-    delta_val = total_students - last_week_count
+    student_delta = total_students - last_week_count
 
 
     col1, col2, col3= st.columns(3)
@@ -1034,7 +1045,7 @@ def page_review_attendance():
         st.metric(
             label="Attendance This Week",
             value=total_this_week,
-            delta=f"{delta_val} compared to previous week"
+            delta=f"{attendance_delta} compared to previous week"
         )
 
     # Add a second metric if you want, e.g. "Absent This Week" vs. "Absent Last Week"
@@ -1053,7 +1064,7 @@ def page_review_attendance():
         st.metric(
             label="Total Students",
             value=total_students,
-            delta=f"{delta_val} from last week"
+            delta=f"{student_delta} from last week"
         )
 
 

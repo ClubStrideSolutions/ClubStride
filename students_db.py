@@ -125,10 +125,25 @@ def store_student_record(name, phone, contact_email, program_id, grade="", schoo
         return f"New student record added for {name} (ID={student_id})!"
 
 
-def get_all_students():
+# def get_all_students():
+#     db = connect_to_db()
+#     coll = db["Student_Records"]
+#     return list(coll.find())
+def get_all_students(program_ids=None):
+    """
+    Returns a list of student records.
+    If 'program_ids' is provided (list of numeric IDs),
+    only returns those records where 'program_id' is in that list.
+    """
     db = connect_to_db()
     coll = db["Student_Records"]
-    return list(coll.find())
+    
+    if program_ids:
+        query = {"program_id": {"$in": program_ids}}
+    else:
+        query = {}
+    
+    return list(coll.find(query))
 
 
 def get_all_attendance_subdocs():
