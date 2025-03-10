@@ -325,24 +325,56 @@ def page_manage_students():
     with col_center:
         st.header("Manage Students")
         is_admin = st.session_state.get("is_admin", False)
+        # =========== NEW: Program Filter for Admin ===========
 
+        if is_admin:
+            all_programs = list_programs()  # from instructors_db
+            prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+
+            # Build a list of (program_id, "name") for the selectbox
+            program_choices = [(None, "All Programs")] + [(p["program_id"], p["program_name"]) for p in all_programs]
+            
+            selected_prog_id = st.selectbox(
+                "Select Program to View:",
+                options=[pc[0] for pc in program_choices],
+                format_func=lambda pid: "All Programs" if pid is None else prog_map[pid]
+            )
+
+            if selected_prog_id is None:
+                # Admin sees all students
+                students = get_all_students()
+            else:
+                # Admin sees only students in the chosen program
+                students = get_all_students(program_ids=[selected_prog_id])
+
+        else:
         # ---------------------------
         # 1) Load all students
         # ---------------------------
-        all_students = get_all_students()  # from Mongo
-        if not all_students:
-            st.info("No students in the database.")
-            # return
+            permitted_ids = st.session_state.get("instructor_program_ids", [])
+            if not permitted_ids:
+                st.warning("You have no assigned programs. Contact an admin for access.")
+                return
+
+            students = get_all_students(program_ids=permitted_ids)
+
+        if not students:
+            st.info("No students in the database (for the selected program).")
+            return
+        # all_students = get_all_students()  # from Mongo
+        # if not all_students:
+        #     st.info("No students in the database.")
+        #     # return
 
         # ---------------------------
         # 2) If admin, show all; else filter by numeric program_id
         # ---------------------------
-        if is_admin:
-            students = all_students
-        else:
-            permitted_ids = st.session_state.get("instructor_program_ids", [])  # numeric IDs
-            # print(permitted_ids)
-            students = [s for s in all_students if s.get("program_id") in permitted_ids]
+        # if is_admin:
+        #     students = all_students
+        # else:
+        #     permitted_ids = st.session_state.get("instructor_program_ids", [])  # numeric IDs
+        #     # print(permitted_ids)
+        #     students = [s for s in all_students if s.get("program_id") in permitted_ids]
 
         # if not students:
         #     st.info("No students found for your assigned programs.")
@@ -588,21 +620,46 @@ def page_take_attendance():
     )
     is_admin = st.session_state.get("is_admin", False)
 
+     # =========== NEW: Admin Program Filter ===========
+    if is_admin:
+        all_programs = list_programs()
+        prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+
+        program_choices = [(None, "All Programs")] + [(p["program_id"], p["program_name"]) for p in all_programs]
+        selected_prog_id = st.selectbox(
+            "Select Program:",
+            options=[pc[0] for pc in program_choices],
+            format_func=lambda pid: "All Programs" if pid is None else prog_map[pid]
+        )
+
+        if selected_prog_id is None:
+            # Admin sees *all* students
+            students = get_all_students()
+        else:
+            # Admin sees only students in one chosen program
+            students = get_all_students(program_ids=[selected_prog_id])
+    else:
+        permitted_ids = st.session_state.get("instructor_program_ids", [])
+        if not permitted_ids:
+            st.info("No assigned programs found. Contact an admin for access.")
+            return
+        students = get_all_students(program_ids=permitted_ids)
+
     # 1) Load all students from Mongo.
-    all_students = get_all_students()
+    # all_students = get_all_students()
 
     # 2) Build a dict {program_id: program_name} from Postgres for display.
-    all_programs = list_programs()  # returns e.g. [ { 'program_id': 1, 'program_name': 'STEM' }, ... ]
-    prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+    # all_programs = list_programs()  # returns e.g. [ { 'program_id': 1, 'program_name': 'STEM' }, ... ]
+    # prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
 
-    # 3) Filter students if the user is an instructor.
-    if is_admin:
-        # Admin sees all students
-        students = all_students
-    else:
-        # Instructor: get assigned program IDs from session_state
-        permitted_ids = st.session_state.get("instructor_program_ids", [])
-        students = [s for s in all_students if s.get("program_id") in permitted_ids]
+    # # 3) Filter students if the user is an instructor.
+    # if is_admin:
+    #     # Admin sees all students
+    #     students = all_students
+    # else:
+    #     # Instructor: get assigned program IDs from session_state
+    #     permitted_ids = st.session_state.get("instructor_program_ids", [])
+    #     students = [s for s in all_students if s.get("program_id") in permitted_ids]
 
     if not students:
         st.info("No students found. (Check whether you have assigned programs or student data.)")
@@ -725,45 +782,110 @@ def page_take_attendance():
 #####################
 def show_attendance_logs():
     # 1) If not cached, fetch raw attendance docs from Mongo.
-    if st.session_state["attendance_records"] is None:
+    # if st.session_state["attendance_records"] is None:
+    if "attendance_records" not in st.session_state or st.session_state["attendance_records"] is None:
         try:
             # Each record looks like:
             # {"student_id":..., "name":..., "program_id":..., "attendance":{ "date":..., "status":..., "comment":... }}
             records = get_all_attendance_subdocs()
-
-            # Build dict {program_id: program_name} from Postgres for later display
-            prog_map = {p["program_id"]: p["program_name"] for p in list_programs()}
-
-            # Are we an admin or instructor?
-            is_admin = st.session_state.get("is_admin", False)
-            if not is_admin:
-                # Filter by numeric program_id in the instructor's assigned list
-                permitted_ids = st.session_state.get("instructor_program_ids", [])
-                records = [r for r in records if r.get("program_id") in permitted_ids]
-
-            # Store the program name into each record for easy display
-            for r in records:
-                pid = r.get("program_id", 0)
-                r["program_name"] = prog_map.get(pid, f"Program ID={pid}")
-
             st.session_state["attendance_records"] = records
+
 
         except Exception as e:
             st.error(f"Error: {e}")
             st.session_state["attendance_records"] = []
-
-    # 2) Display the logs
+            return
+        
     logs = st.session_state["attendance_records"]
-    st.subheader("Daily Attendance Logs")
+    if not logs:
+        st.info("No attendance records found.")
+        return
+            # is_admin = st.session_state.get("is_admin", False)
+            # if is_admin:
+                # 1) Build a dropdown to select program or "All"
+    all_programs = list_programs()  # from instructors_db
+    prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+    is_admin = st.session_state.get("is_admin", False)
+    if is_admin:
+        # Option structure: [(None, "All Programs"), (101, "STEM"), ...]
+        program_choices = [(None, "All Programs")] + [
+            (p["program_id"], p["program_name"]) for p in all_programs
+        ]
+
+        selected_prog_id = st.selectbox(
+            "Filter Attendance by Program",
+            options=[pc[0] for pc in program_choices],  # just the IDs (None or int)
+            format_func=lambda pid: "All Programs" if pid is None else prog_map[pid],
+            key="daily_logs_program_select"
+        )
+
+        if selected_prog_id is not None:
+            logs = [r for r in logs if (r["program_id"] == selected_prog_id or selected_prog_id is None)]
+
+            # If user chooses a specific program, filter records
+            # records = [r for r in records if r.get("program_id") == selected_prog_id]
+
+    else:
+                # 2) Instructor filtering by assigned program(s)
+        permitted_ids = st.session_state.get("instructor_program_ids", [])
+        logs = [r for r in records if r.get("program_id") in permitted_ids]
+
+    for r in logs:
+        pid = r.get("program_id", 0)
+        r["program_name"] = prog_map.get(pid, f"Program ID={pid}")
+
+      # 5) Next filter by Name
+    if logs:
+        # Gather unique names from the filtered logs
+        all_names = sorted({doc.get("name", "Unknown") for doc in logs})
+        name_choice = st.selectbox(
+            label="Filter by Student Name",
+            options=["All Students"] + all_names,
+            key="daily_logs_name_select"
+        )
+
+        if name_choice != "All Students":
+            logs = [doc for doc in logs if doc.get("name") == name_choice]
+    else:
+        st.info("No attendance records after program filtering.")
+        return
 
     if not logs:
         st.info("No attendance records found.")
         return
+            # Build dict {program_id: program_name} from Postgres for later display
+            # prog_map = {p["program_id"]: p["program_name"] for p in list_programs()}
+
+            # Are we an admin or instructor?
+            # is_admin = st.session_state.get("is_admin", False)
+            # if not is_admin:
+            #     # Filter by numeric program_id in the instructor's assigned list
+            #     permitted_ids = st.session_state.get("instructor_program_ids", [])
+            #     records = [r for r in records if r.get("program_id") in permitted_ids]
+
+            # Store the program name into each record for easy display
+        #     for r in records:
+        #         pid = r.get("program_id", 0)
+        #         r["program_name"] = prog_map.get(pid, f"Program ID={pid}")
+
+        #     st.session_state["attendance_records"] = records
+
+        # except Exception as e:
+        #     st.error(f"Error: {e}")
+        #     st.session_state["attendance_records"] = []
+
+    # 2) Display the logs
+    # logs = st.session_state["attendance_records"]
+    # st.subheader("Daily Attendance Logs")
+
+    # if not logs:
+    #     st.info("No attendance records found.")
+    #     return
     
-    all_names = sorted({doc.get("name", "Unknown") for doc in logs})
-    selected_name = st.selectbox("Focus on One Student:", options=["All Students"] + all_names)
-    if selected_name != "All Students":
-        logs = [doc for doc in logs if doc.get("name") == selected_name]
+    # all_names = sorted({doc.get("name", "Unknown") for doc in logs})
+    # selected_name = st.selectbox("Focus on One Student:", options=["All Students"] + all_names)
+    # if selected_name != "All Students":
+    #     logs = [doc for doc in logs if doc.get("name") == selected_name]
 
 
     global_idx = 0
@@ -1212,114 +1334,115 @@ def page_generate_reports():
         st.info("No valid attendance data to display.")
         return
 
+    if is_admin:
 
-    # st.help("Below are some prebuilt charts on the dataset.")
-    with st.expander("Visualizations of Full Attendance Data"):
-    # 1) Convert 'status' to numeric: Present=1, Late=0.5, Absent=0
-        def status_to_numeric(s):
-            if s == "Present":
-                return 1
-            elif s == "Late":
-                return 0.5
-            else:
-                return 0
+        # st.help("Below are some prebuilt charts on the dataset.")
+        with st.expander("Admin Visualizations of Full Attendance Data"):
+        # 1) Convert 'status' to numeric: Present=1, Late=0.5, Absent=0
+            def status_to_numeric(s):
+                if s == "Present":
+                    return 1
+                elif s == "Late":
+                    return 0.5
+                else:
+                    return 0
 
-        df["attendance_value"] = df["status"].apply(status_to_numeric)
+            df["attendance_value"] = df["status"].apply(status_to_numeric)
 
-        # 2) Group by program_name -> compute average attendance
-        ranking_df = df.groupby("program_name", as_index=False)["attendance_value"].mean()
-        ranking_df.rename(columns={"attendance_value": "avg_attendance_score"}, inplace=True)
-        ranking_df.sort_values("avg_attendance_score", ascending=False, inplace=True)
+            # 2) Group by program_name -> compute average attendance
+            ranking_df = df.groupby("program_name", as_index=False)["attendance_value"].mean()
+            ranking_df.rename(columns={"attendance_value": "avg_attendance_score"}, inplace=True)
+            ranking_df.sort_values("avg_attendance_score", ascending=False, inplace=True)
 
-        st.subheader("Program Ranking by Average Attendance")
-        st.table(ranking_df)
+            st.subheader("Program Ranking by Average Attendance")
+            st.table(ranking_df)
 
-        # PLOT #1: Bar chart of average attendance by program
-        fig_bar = px.bar(
-            ranking_df,
-            x="program_name",
-            y="avg_attendance_score",
-            title="Average Attendance Score by Program"
-        )
-        # st.plotly_chart(fig_bar, use_container_width=True)
+            # PLOT #1: Bar chart of average attendance by program
+            fig_bar = px.bar(
+                ranking_df,
+                x="program_name",
+                y="avg_attendance_score",
+                title="Average Attendance Score by Program"
+            )
+            # st.plotly_chart(fig_bar, use_container_width=True)
 
-        status_counts = df["status"].value_counts().reset_index()
-        status_counts.columns = ["status", "count"]
+            status_counts = df["status"].value_counts().reset_index()
+            status_counts.columns = ["status", "count"]
 
-        # st.subheader("Proportion of Attendance Statuses")
-        # st.write("A quick look at the distribution of Present, Late, and Absent overall. "
-        #         "Remember that pie charts can be misleading if too many slices are present.")
-        
-        fig_pie = px.pie(
-            status_counts,
-            values="count",
-            names="status",
-            title="Distribution of Attendance Statuses",
-            hole=0.4  # optional "donut" style
-        )
-        fig_pie.update_layout(
-            width=500,   # adjust as needed
-            height=500   # adjust as needed
-        )
-        # st.plotly_chart(fig_pie, use_container_width=True)
+            # st.subheader("Proportion of Attendance Statuses")
+            # st.write("A quick look at the distribution of Present, Late, and Absent overall. "
+            #         "Remember that pie charts can be misleading if too many slices are present.")
+            
+            fig_pie = px.pie(
+                status_counts,
+                values="count",
+                names="status",
+                title="Distribution of Attendance Statuses",
+                hole=0.4  # optional "donut" style
+            )
+            fig_pie.update_layout(
+                width=500,   # adjust as needed
+                height=500   # adjust as needed
+            )
+            # st.plotly_chart(fig_pie, use_container_width=True)
 
-        # 3) Time series: overall attendance over time
-        # Ensure df["date"] is properly typed
-        df["date"] = pd.to_datetime(df["date"], errors="coerce")
-        daily_df = df.groupby("date", as_index=False)["attendance_value"].mean()
+            # 3) Time series: overall attendance over time
+            # Ensure df["date"] is properly typed
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            daily_df = df.groupby("date", as_index=False)["attendance_value"].mean()
 
-        fig_line = px.line(
-            daily_df,
-            x="date",
-            y="attendance_value",
-            title="Average Attendance Over Time (All Programs)"
-        )
-        fig_line.update_traces(line=dict(width=4))
+            fig_line = px.line(
+                daily_df,
+                x="date",
+                y="attendance_value",
+                title="Average Attendance Over Time (All Programs)"
+            )
+            fig_line.update_traces(line=dict(width=4))
 
-        # st.plotly_chart(fig_line, use_container_width=True)
+            # st.plotly_chart(fig_line, use_container_width=True)
 
-        # 4) Multi-line time series, color-coded by program
-        multi_df = (
-            df.groupby(["date", "program_name"], as_index=False)["attendance_value"]
-                .mean()
-        )
-        fig_multi = px.line(
-            multi_df,
-            x="date",
-            y="attendance_value",
-            color="program_name",
-            title="Attendance Over Time by Program"
-        )
-        fig_multi.update_traces(line=dict(width=3))
+            # 4) Multi-line time series, color-coded by program
+            multi_df = (
+                df.groupby(["date", "program_name"], as_index=False)["attendance_value"]
+                    .mean()
+            )
+            fig_multi = px.line(
+                multi_df,
+                x="date",
+                y="attendance_value",
+                color="program_name",
+                title="Attendance Over Time by Program"
+            )
+            fig_multi.update_traces(line=dict(width=3))
 
-        # st.plotly_chart(fig_multi, use_container_width=True)
+            # st.plotly_chart(fig_multi, use_container_width=True)
 
-        # First row: fig_bar (left), fig_pie (right)
-        row1_col1, row1_col2 = st.columns(2)
+            # First row: fig_bar (left), fig_pie (right)
+            row1_col1, row1_col2 = st.columns(2)
 
-        with row1_col1:
-            st.subheader("Average Attendance Score by Program")
-            st.plotly_chart(fig_bar, use_container_width=True)
+            with row1_col1:
+                st.subheader("Average Attendance Score by Program")
+                st.plotly_chart(fig_bar, use_container_width=True)
 
-        with row1_col2:
-            st.subheader("Proportion of Attendance Statuses")
-            # st.write(
-            #     "A quick look at the distribution of Present, Late, and Absent overall. "
-            #     "Remember that pie charts can be misleading if too many slices are present."
-            # )
-            st.plotly_chart(fig_pie, use_container_width=True)
+            with row1_col2:
+                st.subheader("Proportion of Attendance Statuses")
+                # st.write(
+                #     "A quick look at the distribution of Present, Late, and Absent overall. "
+                #     "Remember that pie charts can be misleading if too many slices are present."
+                # )
+                st.plotly_chart(fig_pie, use_container_width=True)
 
-        st.write("---")
-        # Second row: fig_line (left), fig_multi (right)
-        # row2_col1, row2_col2 = st.columns(2)
+            st.write("---")
+            # Second row: fig_line (left), fig_multi (right)
+            # row2_col1, row2_col2 = st.columns(2)
 
-        # with row2_col1:
-        st.subheader("Average Attendance Over Time (All Programs)")
-        st.plotly_chart(fig_line, use_container_width=True)
+            # with row2_col1:
+            st.subheader("Average Attendance Over Time (All Programs)")
+            st.plotly_chart(fig_line, use_container_width=True)
 
-        # with row2_col2:
-        st.subheader("Attendance Over Time by Program")
-        st.plotly_chart(fig_multi, use_container_width=True)
+            # with row2_col2:
+            st.subheader("Attendance Over Time by Program")
+            st.plotly_chart(fig_multi, use_container_width=True)
 
 
 
