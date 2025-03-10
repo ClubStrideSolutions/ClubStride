@@ -12,7 +12,7 @@ from bson import ObjectId
 
 from instructors_db import list_programs
 
-# load_dotenv()
+load_dotenv()
 
 @st.cache_resource
 def connect_to_db():
@@ -167,10 +167,21 @@ def get_all_attendance_subdocs():
     return list(coll.aggregate(pipeline))
 
 
-def get_missed_counts_for_all_students():
+def get_missed_counts_for_all_students(program_ids=None):
+    """
+    Returns a list of {student_id, name, phone, program_id, sum_missed}
+    Optionally filters by a list of program_ids if provided.
+    """
     db = connect_to_db()
     coll = db["Student_Records"]
-    pipeline = [
+    
+    pipeline = []
+    
+    # Only match certain program IDs if given (i.e., instructor scenario)
+    if program_ids:
+        pipeline.append({"$match": {"program_id": {"$in": program_ids}}})
+    
+    pipeline += [
         {"$unwind": "$attendance"},
         {
             "$group": {
@@ -202,6 +213,7 @@ def get_missed_counts_for_all_students():
             }
         }
     ]
+    
     return list(coll.aggregate(pipeline))
 
 

@@ -865,48 +865,97 @@ def show_attendance_logs():
             st.info("Upsert cancelled.")
             st.rerun()
 
-
 def show_missed_counts():
-    # 1) If not cached, fetch missed counts
+    st.subheader("Missed Counts for All Students")
+
+    # Only fetch missed data once or if the user requests a refresh
     if st.session_state["missed_counts"] is None:
         try:
-            # Each item looks like:
-            # {"student_id":..., "name":..., "phone":..., "program_id":..., "sum_missed":... }
-            missed_data = get_missed_counts_for_all_students()
-
-            # Build dict {program_id: program_name} for display
-            prog_map = {p["program_id"]: p["program_name"] for p in list_programs()}
-
+            # Determine if user is admin or instructor
             is_admin = st.session_state.get("is_admin", False)
-            if not is_admin:
+            
+            if is_admin:
+                # Admin sees all programs
+                missed_data = get_missed_counts_for_all_students()
+            else:
+                # Instructor sees only permitted program IDs
                 permitted_ids = st.session_state.get("instructor_program_ids", [])
-                missed_data = [m for m in missed_data if m.get("program_id") in permitted_ids]
+                missed_data = get_missed_counts_for_all_students(program_ids=permitted_ids)
+            
+            # Build a dict {program_id -> program_name} from Postgres for easy display
+            prog_map = {p["program_id"]: p["program_name"] for p in list_programs()}
 
             # Insert a "program_name" field for display
             for m in missed_data:
                 pid = m.get("program_id", 0)
                 m["program_name"] = prog_map.get(pid, f"Program ID={pid}")
 
+            # Cache the result in session state
             st.session_state["missed_counts"] = missed_data
 
         except Exception as e:
             st.error(f"Error fetching missed counts: {e}")
             st.session_state["missed_counts"] = []
 
-    # 2) Display the data
+    # Actually display the missed counts data
     data = st.session_state["missed_counts"]
-    st.subheader("Missed Counts for All Students")
     if not data:
         st.info("No missed data found.")
+        return
+
+    # Convert to DataFrame for exploration
+    MissedCountsdf = pd.DataFrame(data)
+
+    # Use the streamlit_extras.dataframe_explorer
+    MissedCountsdf_output = dataframe_explorer(MissedCountsdf)
+    MissedCounts_dataframe = pd.DataFrame(MissedCountsdf_output)
+
+    if MissedCounts_dataframe.empty:
+        st.info("No data selected in the explorer.")
     else:
-        MissedCountsdf = pd.DataFrame(data)
-        MissedCountsdf_output= dataframe_explorer(MissedCountsdf) 
-        MissedCounts_dataframe= pd.DataFrame(MissedCountsdf_output)
-        if MissedCounts_dataframe.empty:
-            st.info("No data selected in the explorer.")
-        else:
-            st.dataframe(MissedCounts_dataframe, use_container_width=True)
-        # st.dataframe(df, use_container_width=True)
+        st.dataframe(MissedCounts_dataframe, use_container_width=True)
+
+# def show_missed_counts():
+#     # 1) If not cached, fetch missed counts
+#     if st.session_state["missed_counts"] is None:
+#         try:
+#             # Each item looks like:
+#             # {"student_id":..., "name":..., "phone":..., "program_id":..., "sum_missed":... }
+#             missed_data = get_missed_counts_for_all_students()
+
+#             # Build dict {program_id: program_name} for display
+#             prog_map = {p["program_id"]: p["program_name"] for p in list_programs()}
+
+#             is_admin = st.session_state.get("is_admin", False)
+#             if not is_admin:
+#                 permitted_ids = st.session_state.get("instructor_program_ids", [])
+#                 missed_data = [m for m in missed_data if m.get("program_id") in permitted_ids]
+
+#             # Insert a "program_name" field for display
+#             for m in missed_data:
+#                 pid = m.get("program_id", 0)
+#                 m["program_name"] = prog_map.get(pid, f"Program ID={pid}")
+
+#             st.session_state["missed_counts"] = missed_data
+
+#         except Exception as e:
+#             st.error(f"Error fetching missed counts: {e}")
+#             st.session_state["missed_counts"] = []
+
+#     # 2) Display the data
+#     data = st.session_state["missed_counts"]
+#     st.subheader("Missed Counts for All Students")
+#     if not data:
+#         st.info("No missed data found.")
+#     else:
+#         MissedCountsdf = pd.DataFrame(data)
+#         MissedCountsdf_output= dataframe_explorer(MissedCountsdf) 
+#         MissedCounts_dataframe= pd.DataFrame(MissedCountsdf_output)
+#         if MissedCounts_dataframe.empty:
+#             st.info("No data selected in the explorer.")
+#         else:
+#             st.dataframe(MissedCounts_dataframe, use_container_width=True)
+#         # st.dataframe(df, use_container_width=True)
 
 def show_last_week_attendance():
     """
