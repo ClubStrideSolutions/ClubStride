@@ -7,7 +7,7 @@ import streamlit as st  # Only needed if you prefer st.cache_resource or st.secr
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# load_dotenv()
 
 # DB_URL = os.environ.get("DB_URL")
 DB_URL= st.secrets["DB_URL"]

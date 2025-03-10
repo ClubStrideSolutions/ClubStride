@@ -1262,15 +1262,15 @@ def page_generate_reports():
 
         st.write("---")
         # Second row: fig_line (left), fig_multi (right)
-        row2_col1, row2_col2 = st.columns(2)
+        # row2_col1, row2_col2 = st.columns(2)
 
-        with row2_col1:
-            st.subheader("Average Attendance Over Time (All Programs)")
-            st.plotly_chart(fig_line, use_container_width=True)
+        # with row2_col1:
+        st.subheader("Average Attendance Over Time (All Programs)")
+        st.plotly_chart(fig_line, use_container_width=True)
 
-        with row2_col2:
-            st.subheader("Attendance Over Time by Program")
-            st.plotly_chart(fig_multi, use_container_width=True)
+        # with row2_col2:
+        st.subheader("Attendance Over Time by Program")
+        st.plotly_chart(fig_multi, use_container_width=True)
 
 
 
