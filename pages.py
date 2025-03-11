@@ -397,24 +397,7 @@ def page_manage_students():
         if not students:
             st.info("No students in the database (for the selected program).")
             # return
-        # all_students = get_all_students()  # from Mongo
-        # if not all_students:
-        #     st.info("No students in the database.")
-        #     # return
-
-        # ---------------------------
-        # 2) If admin, show all; else filter by numeric program_id
-        # ---------------------------
-        # if is_admin:
-        #     students = all_students
-        # else:
-        #     permitted_ids = st.session_state.get("instructor_program_ids", [])  # numeric IDs
-        #     # print(permitted_ids)
-        #     students = [s for s in all_students if s.get("program_id") in permitted_ids]
-
-        # if not students:
-        #     st.info("No students found for your assigned programs.")
-        #     # return
+       
 
          # st.subheader("Add or Update Students")
         with st.expander("Current Students", expanded=True):
