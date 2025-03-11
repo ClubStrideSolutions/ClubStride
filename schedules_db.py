@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from mailersend import emails  # so we can query the "Student_Records" collection
 import os
-# load_dotenv()
+load_dotenv()
 
 def notify_schedule_change(program_id: int, schedule_doc: dict, event_type="created"):
     """
