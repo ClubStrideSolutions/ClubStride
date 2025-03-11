@@ -360,3 +360,30 @@ def list_instructor_programs(instructor_id: int) -> list:
             "program_name": r[1]
         })
     return results
+
+
+def delete_program(program_id: int) -> bool:
+    """
+    Delete a program by program_id.
+    Also remove any references in instructor_programs pivot.
+    Returns True if the program was deleted, False otherwise.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # 1) Remove references in the pivot
+        cursor.execute("DELETE FROM instructor_programs WHERE program_id = %s", (program_id,))
+        
+        # 2) Delete the program itself
+        cursor.execute("DELETE FROM programs WHERE program_id = %s", (program_id,))
+        
+        conn.commit()
+        rows_affected = cursor.rowcount
+        return rows_affected > 0
+    except psycopg2.Error as e:
+        print("Error deleting program:", e)
+        conn.rollback()
+        return False
+    finally:
+        cursor.close()
+        conn.close()
