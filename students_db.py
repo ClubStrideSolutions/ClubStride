@@ -216,43 +216,6 @@ def get_missed_counts_for_all_students(program_ids=None):
     return list(coll.aggregate(pipeline))
 
 
-# def get_missed_counts_for_all_students():
-#     db = connect_to_db()
-#     coll = db["Student_Records"]
-#     pipeline = [
-#         {"$unwind": "$attendance"},
-#         {
-#             "$group": {
-#                 "_id": {
-#                     "student_id": "$student_id",
-#                     "name": "$name",
-#                     "phone": "$phone",
-#                     "program_id": "$program_id"
-#                 },
-#                 "sum_missed": {
-#                     "$sum": {
-#                         "$cond": [
-#                             {"$eq": ["$attendance.status", "Absent"]},
-#                             1,
-#                             0
-#                         ]
-#                     }
-#                 }
-#             }
-#         },
-#         {
-#             "$project": {
-#                 "_id": 0,
-#                 "student_id": "$_id.student_id",
-#                 "name": "$_id.name",
-#                 "phone": "$_id.phone",
-#                 "program_id": "$_id.program_id",
-#                 "sum_missed": 1
-#             }
-#         }
-#     ]
-#     return list(coll.aggregate(pipeline))
-
 
 def check_admin(connection_string):
     """
