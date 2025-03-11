@@ -283,7 +283,9 @@ def main():
             # Optionally show the instructor role or ID if you wish
             instructor_role = st.session_state.get("instructor_role", "Instructor")
             instructor_id = st.session_state.get("instructor_id", "Unknown")
-            st.sidebar.write(f"**{instructor_role}** (ID={instructor_id})")
+            instructor_username =  st.session_state.get("instructor_username", "Admin").strip()
+
+            st.sidebar.write(f"**{instructor_role}** (ID={instructor_username})")
         else:
             st.sidebar.write("**No user logged in**")
         # st.markdown("---")

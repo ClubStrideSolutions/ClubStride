@@ -237,8 +237,18 @@ def page_manage_instructors():
                             st.warning(f"Removed {prog_name} from {username}")
                             st.rerun()
 
-            st.write("---")
-            
+            st.write("---") 
+            # with st.expander("Reset Password"):
+            st.write("Set a new password for this instructor.")
+            new_pass = st.text_input("New Password", type="password", key=f"pwd_reset_{instr_id}")
+            if st.button("Confirm Password Reset", key=f"confirm_reset_{instr_id}"):
+                if not new_pass:
+                    st.error("Password cannot be empty.")
+                else:
+                    update_instructor_password(instr_id, new_pass)
+                    st.success(f"Password reset for {username}.")
+
+            st.write("---") 
             # 3. Assign a New Program
             col_assign, assign_mid, assign_out = st.columns([3,1,1])
 
@@ -282,6 +292,7 @@ def page_instructor_login():
             if result:
                 st.session_state.instructor_logged_in = True
                 st.session_state.instructor_id = result["instructor_id"]
+                st.session_state.instructor_username = username  # <-- Add this
                 st.session_state.instructor_role = result["role"]
 
                 # GET assigned programs from pivot
@@ -566,7 +577,9 @@ def page_manage_students():
                     f"**Grade:** {grade}, **School:** {school}"
                 ) #**Parent:** {parent_email}
 
-                col_del, col_edit, col_att = st.columns(3)
+                # col_del, col_edit, col_att = st.columns(3)
+                col_del, col_edit, col_today, col_past = st.columns(4)
+
                 with col_del:
                     if st.button(f"Delete (ID={student_id})", key=f"btn_delete_{student_id}"):
                         # Instructors must only delete if the student's program_id is in permitted_ids
@@ -598,76 +611,159 @@ def page_manage_students():
                         }
                         st.rerun()
 
-                with col_att:
+                with col_today:
                 # NEW: Button that triggers "Mark Attendance" for just this student
                     if st.button(f"Mark Attendance", key=f"btn_attendance_{student_id}"):
                         st.session_state["attendance_student"] = s  # store the entire student doc
                         st.rerun()
 
+                with col_past:
+                    if st.button(f"Mark Past", key=f"btn_attendance_past_{student_id}"):
+                        st.session_state["attendance_student"] = s
+                        st.session_state["attendance_mode"] = "past"
+                        st.rerun()
+
+
             if "attendance_student" in st.session_state:
                 single_stud = st.session_state["attendance_student"]
-                st.subheader(f"Submit Attendance for {single_stud['name']}")
-                
-                # Optional: date/time for "today" or a custom date
-                date_val = st.date_input("Date", value=date.today(), key="single_stud_date")
-                time_val = st.time_input("Time", value=time(9, 0), key="single_stud_time")
-                combined_dt = datetime.combine(date_val, time_val)
+                mode = st.session_state.get("attendance_mode", "today")
 
-                status_opt = ["Present", "Late", "Absent", "Excused"]
-                chosen_status = st.selectbox("Status", options=status_opt, index=0, key="single_stud_status")
-                comment_txt = st.text_input("Comment (Optional)", key="single_stud_comment")
+                if mode == "today":
+                    st.subheader(f"Mark Attendance (Today) for {single_stud['name']}")
+                    
+                    # 1) Pick date/time (optional, default to "now")
+                    date_val = st.date_input("Date", value=date.today(), key="single_stud_date")
+                    time_val = st.time_input("Time", value=time(9, 0), key="single_stud_time")
+                    combined_dt = datetime.combine(date_val, time_val)
 
-                if st.button("Submit Single Attendance"):
-                    try:
-                        # The same function you use for normal attendance
-                        msg = record_student_attendance_in_array(
-                            name=single_stud["name"],
-                            program_id=single_stud["program_id"],
-                            status=chosen_status,
-                            comment=comment_txt,
-                            attendance_date=combined_dt
-                        )
-                        st.success(f"Marked {single_stud['name']} as {chosen_status}. {msg}")
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+                    # 2) Status & comment
+                    status_opt = ["Present", "Late", "Absent", "Excused"]
+                    chosen_status = st.selectbox("Status", options=status_opt, index=0, key="single_stud_status")
+                    comment_txt = st.text_input("Comment (Optional)", key="single_stud_comment")
 
-                if st.button("Cancel", key="single_stud_cancel"):
-                    st.session_state.pop("attendance_student")
-                    st.info("Individual attendance marking canceled.")
-                    st.rerun()
-            # ---------------------------
-            # 4) If we clicked Edit, show form
-            # ---------------------------
-            if "editing_student" in st.session_state:
-                editing_data = st.session_state["editing_student"]
-                st.subheader(f"Edit Student Record (ID={editing_data['student_id']})")
+                    # 3) Submit
+                    if st.button("Submit Attendance"):
+                        try:
+                            msg = record_student_attendance_in_array(
+                                name=single_stud["name"],
+                                program_id=single_stud["program_id"],
+                                status=chosen_status,
+                                comment=comment_txt,
+                                attendance_date=combined_dt
+                            )
+                            st.success(f"Marked {single_stud['name']} as {chosen_status}. {msg}")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
-                with st.form("edit_student_form"):
-                    new_name = st.text_input("Name", value=editing_data["name"])
-                    new_phone = st.text_input("Phone", value=editing_data["phone"])
-                    new_contact_email = st.text_input("Contact Email", value=editing_data["contact_email"])
-                    # new_parent_email = st.text_input("Parent Email", value=editing_data["parent_email"])
-                    new_grade = st.text_input("Grade", value=editing_data["grade"])
-                    new_school = st.text_input("School", value=editing_data["school"])
-                    submitted_edit = st.form_submit_button("Save Changes")
-                    if submitted_edit:
-                        updated = update_student_info(
-                            editing_data["student_id"],
-                            new_name,
-                            new_phone,
-                            new_contact_email,
-                            new_grade,
-                            new_school
-                            
-                            # new_parent_email
-                        )
-                        if updated:
-                            st.success(f"Student record updated for {new_name}.")
-                        else:
-                            st.warning("No changes made or update failed.")
-
-                        st.session_state.pop("editing_student")
+                        # Clear from session
+                        st.session_state.pop("attendance_student")
+                        st.session_state.pop("attendance_mode")
                         st.rerun()
+
+                    if st.button("Cancel", key="single_attendance_cancel"):
+                        st.session_state.pop("attendance_student")
+                        st.session_state.pop("attendance_mode", None)
+                        st.info("Individual attendance marking canceled.")
+                        st.rerun()
+
+                elif mode == "past":
+                    st.subheader(f"Mark Past Attendance for {single_stud['name']}")
+
+                    # Let user pick a "past" date/time
+                    date_val = st.date_input("Session Date", value=date.today(), key="past_single_date")
+                    time_val = st.time_input("Session Time", value=time(9, 0), key="past_single_time")
+                    combined_dt = datetime.combine(date_val, time_val)
+
+                    status_opt = ["Present", "Late", "Absent", "Excused"]
+                    chosen_status = st.selectbox("Status", options=status_opt, index=0, key="past_single_status")
+                    comment_txt = st.text_input("Comment (Optional)", key="past_single_comment")
+
+                    if st.button("Submit Past Attendance", key="past_single_submit"):
+                        try:
+                            msg = record_student_attendance_in_array(
+                                name=single_stud["name"],
+                                program_id=single_stud["program_id"],
+                                status=chosen_status,
+                                comment=comment_txt,
+                                attendance_date=combined_dt
+                            )
+                            st.success(f"Marked {single_stud['name']} as {chosen_status} on {combined_dt}. {msg}")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+                        st.session_state.pop("attendance_student")
+                        st.session_state.pop("attendance_mode")
+                        st.rerun()
+
+                    if st.button("Cancel Past", key="past_single_cancel"):
+                        st.session_state.pop("attendance_student")
+                        st.session_state.pop("attendance_mode")
+                        st.info("Past attendance marking canceled.")
+                        st.rerun()
+            # if "attendance_student" in st.session_state:
+            #     single_stud = st.session_state["attendance_student"]
+            #     st.subheader(f"Submit Attendance for {single_stud['name']}")
+                
+            #     # Optional: date/time for "today" or a custom date
+            #     date_val = st.date_input("Date", value=date.today(), key="single_stud_date")
+            #     time_val = st.time_input("Time", value=time(9, 0), key="single_stud_time")
+            #     combined_dt = datetime.combine(date_val, time_val)
+
+            #     status_opt = ["Present", "Late", "Absent", "Excused"]
+            #     chosen_status = st.selectbox("Status", options=status_opt, index=0, key="single_stud_status")
+            #     comment_txt = st.text_input("Comment (Optional)", key="single_stud_comment")
+
+            #     if st.button("Submit Single Attendance"):
+            #         try:
+            #             # The same function you use for normal attendance
+            #             msg = record_student_attendance_in_array(
+            #                 name=single_stud["name"],
+            #                 program_id=single_stud["program_id"],
+            #                 status=chosen_status,
+            #                 comment=comment_txt,
+            #                 attendance_date=combined_dt
+            #             )
+            #             st.success(f"Marked {single_stud['name']} as {chosen_status}. {msg}")
+            #         except Exception as e:
+            #             st.error(f"Error: {e}")
+
+            #     if st.button("Cancel", key="single_stud_cancel"):
+            #         st.session_state.pop("attendance_student")
+            #         st.info("Individual attendance marking canceled.")
+            #         st.rerun()
+            # # ---------------------------
+            # # 4) If we clicked Edit, show form
+            # # ---------------------------
+            # if "editing_student" in st.session_state:
+            #     editing_data = st.session_state["editing_student"]
+            #     st.subheader(f"Edit Student Record (ID={editing_data['student_id']})")
+
+            #     with st.form("edit_student_form"):
+            #         new_name = st.text_input("Name", value=editing_data["name"])
+            #         new_phone = st.text_input("Phone", value=editing_data["phone"])
+            #         new_contact_email = st.text_input("Contact Email", value=editing_data["contact_email"])
+            #         # new_parent_email = st.text_input("Parent Email", value=editing_data["parent_email"])
+            #         new_grade = st.text_input("Grade", value=editing_data["grade"])
+            #         new_school = st.text_input("School", value=editing_data["school"])
+            #         submitted_edit = st.form_submit_button("Save Changes")
+            #         if submitted_edit:
+            #             updated = update_student_info(
+            #                 editing_data["student_id"],
+            #                 new_name,
+            #                 new_phone,
+            #                 new_contact_email,
+            #                 new_grade,
+            #                 new_school
+                            
+            #                 # new_parent_email
+            #             )
+            #             if updated:
+            #                 st.success(f"Student record updated for {new_name}.")
+            #             else:
+            #                 st.warning("No changes made or update failed.")
+
+            #             st.session_state.pop("editing_student")
+            #             st.rerun()
 
 
 #####################
@@ -1683,6 +1779,9 @@ def page_manage_schedules():
     """
     Page for an instructor (or admin) to create, view, edit, and delete schedules.
     Stores numeric program_id in Mongo, but *displays* times in 12-hour AM/PM.
+    Adds signature fields like:
+      - created_by_username, created_at
+      - updated_by_username, updated_at
     """
 
     instructor_id = st.session_state.get("instructor_id", None)
@@ -1691,11 +1790,10 @@ def page_manage_schedules():
         st.error("You must be logged in as an instructor or admin to manage schedules.")
         return
 
-    # 1) Build a map { program_id -> program_name } from Postgres
     all_programs = list_programs()
     prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
 
-    # 2) Determine which program IDs the user can manage
+    # 1) Determine which program IDs the user can manage
     if is_admin:
         program_id_options = list(prog_map.keys())  # admin sees all
     else:
@@ -1738,7 +1836,7 @@ def page_manage_schedules():
         end_dt = None
 
         if recurrence == "None":
-            # One-time class
+            # One-time
             chosen_date = st.date_input("Class Date", value=date.today(), key="new_schedule_date")
 
             col_start, col_end = st.columns(2)
@@ -1751,7 +1849,6 @@ def page_manage_schedules():
                 st.write(f"Ends at: **{end_t.strftime('%I:%M %p').lstrip('0')}**")
 
             location = st.text_input("Location (Zoom or Physical Room)", key="new_schedule_location")
-
         else:
             # Weekly or Monthly
             st.write("Select multiple days, each with its own time and location.")
@@ -1764,7 +1861,6 @@ def page_manage_schedules():
                 st.write(f"**Times/Location for {d}**")
                 col1, col2 = st.columns(2)
 
-                # Use a unique key that includes the day
                 start_for_day = col1.time_input(
                     f"{d} Start",
                     value=time(9, 0),
@@ -1794,6 +1890,7 @@ def page_manage_schedules():
 
         # "Create Schedule" button
         if st.button("Create Schedule", key="btn_create_schedule"):
+            # Build doc for insertion
             if recurrence == "None":
                 start_dt = datetime.combine(chosen_date, start_t)
                 end_dt = datetime.combine(chosen_date, end_t)
@@ -1806,7 +1903,11 @@ def page_manage_schedules():
                     "start_datetime": start_dt,
                     "end_datetime": end_dt,
                     "days_times": [],
-                    "location": location
+                    "location": location,
+
+                    # Signature fields for creation
+                    "created_by_username": st.session_state.get("instructor_username", "Admin"),
+                    "created_at": datetime.utcnow()
                 }
             else:
                 doc = {
@@ -1817,13 +1918,17 @@ def page_manage_schedules():
                     "notes": notes,
                     "days_times": days_times,
                     "start_datetime": None,
-                    "end_datetime": None
+                    "end_datetime": None,
+
+                    # Signature fields for creation
+                    "created_by_username": st.session_state.get("instructor_username", "Admin"),
+                    "created_at": datetime.utcnow()
                 }
 
             new_id = create_schedule(doc)
             st.success(f"Created schedule with ID: {new_id}")
 
-            # Send notifications to that program’s students
+            # Notify
             notify_schedule_change(selected_prog_id, doc, event_type="created")
             st.rerun()
 
@@ -1854,6 +1959,15 @@ def page_manage_schedules():
         st.write(f"**Recurrence**: {sch.get('recurrence', 'None')}")
         st.write(f"**Notes**: {sch.get('notes', '')}")
 
+        # Show who created / updated & when
+        created_by = sch.get("created_by_username", "N/A")
+        created_at = sch.get("created_at", "N/A")
+        updated_by = sch.get("updated_by_username", "N/A")
+        updated_at = sch.get("updated_at", "N/A")
+
+        st.write(f"**Created by**: {created_by} at {created_at}")
+        st.write(f"**Last Updated by**: {updated_by} at {updated_at}")
+
         # If one-time, show start/end
         if sch.get("recurrence") == "None":
             start_text = _format_time_12h(sch.get("start_datetime"))
@@ -1862,7 +1976,6 @@ def page_manage_schedules():
             if sch.get("location"):
                 st.write(f"**Location**: {sch['location']}")
         else:
-            # Recurring
             dt_list = sch.get("days_times", [])
             if dt_list:
                 st.write("**Days/Times**:")
@@ -1939,7 +2052,6 @@ def page_manage_schedules():
                 end_date_val = existing_end.date() if existing_end else date.today()
                 end_time_val = existing_end.time() if existing_end else time(10, 0)
 
-                # Unique keys for each widget
                 edited_start_date = st.date_input(
                     "Start Date",
                     value=start_date_val,
@@ -1968,7 +2080,6 @@ def page_manage_schedules():
                 )
                 new_days_times = []
             else:
-                # Recurring
                 old_selected_days = [d["day"] for d in old_days_times]
                 selected_days = st.multiselect(
                     "Days of Week",
@@ -2025,7 +2136,7 @@ def page_manage_schedules():
 
                     new_days_times.append({
                         "day": d,
-                        "start_time": str(new_start),  # store "HH:MM:SS"
+                        "start_time": str(new_start),
                         "end_time": str(new_end),
                         "location": new_loc
                     })
@@ -2051,15 +2162,19 @@ def page_manage_schedules():
                     updates["days_times"] = new_days_times
                     updates["start_datetime"] = None
                     updates["end_datetime"] = None
-                    updates.pop("location", None)  # remove if used only for one-time
+                    updates.pop("location", None)
+
+                # NEW: signature for update
+                updates["updated_by_username"] = st.session_state.get("username", "Unknown")
+                updates["updated_at"] = datetime.utcnow()
 
                 success = update_schedule(editing_id, updates)
                 if success:
                     st.success("Schedule updated.")
 
-                    # Rebuild a doc for email
+                    # Build a doc for the notification email
                     updated_doc = {
-                        "program_id": old_program_id,   # Must ensure old_program_id is known
+                        "program_id": old_program_id,
                         "title": new_title,
                         "recurrence": new_recurrence,
                         "notes": new_notes,
@@ -2076,6 +2191,413 @@ def page_manage_schedules():
 
                 st.session_state.pop("editing_schedule", None)
                 st.rerun()
+
+# def page_manage_schedules():
+#     """
+#     Page for an instructor (or admin) to create, view, edit, and delete schedules.
+#     Stores numeric program_id in Mongo, but *displays* times in 12-hour AM/PM.
+#     """
+
+#     instructor_id = st.session_state.get("instructor_id", None)
+#     is_admin = st.session_state.get("is_admin", False)
+#     if not instructor_id and not is_admin:
+#         st.error("You must be logged in as an instructor or admin to manage schedules.")
+#         return
+
+#     # 1) Build a map { program_id -> program_name } from Postgres
+#     all_programs = list_programs()
+#     prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+
+#     # 2) Determine which program IDs the user can manage
+#     if is_admin:
+#         program_id_options = list(prog_map.keys())  # admin sees all
+#     else:
+#         program_id_options = st.session_state.get("instructor_program_ids", [])
+#         if not program_id_options:
+#             st.warning("You have no assigned programs. Contact an admin for access.")
+#             return
+
+#     st.header("Manage Class Schedules")
+
+#     ##################################################
+#     # A) Create a New Schedule
+#     ##################################################
+#     with st.expander("Create a New Schedule", expanded=True):
+#         if program_id_options:
+#             selected_prog_id = st.selectbox(
+#                 "Select Program",
+#                 options=program_id_options,
+#                 format_func=lambda pid: prog_map.get(pid, f"Unknown (ID={pid})"),
+#                 key="select_program_for_new_schedule"
+#             )
+#         else:
+#             st.warning("No assigned programs available.")
+#             return
+
+#         # Provide unique keys for each widget
+#         title = st.text_input("Class Title", "", key="new_schedule_title")
+#         notes = st.text_area("Additional Notes/Description", key="new_schedule_notes")
+
+#         recurrence = st.selectbox(
+#             "Recurrence",
+#             ["None", "Weekly", "Monthly"],
+#             help="Choose 'None' for a one-time class, or 'Weekly/Monthly' for recurring classes.",
+#             key="new_schedule_recurrence"
+#         )
+
+#         location = ""
+#         days_times = []
+#         start_dt = None
+#         end_dt = None
+
+#         if recurrence == "None":
+#             # One-time class
+#             chosen_date = st.date_input("Class Date", value=date.today(), key="new_schedule_date")
+
+#             col_start, col_end = st.columns(2)
+#             with col_start:
+#                 start_t = st.time_input("Start Time", value=time(9, 0), key="new_schedule_start_time")
+#                 st.write(f"Selected Start: **{start_t.strftime('%I:%M %p')}**")
+
+#             with col_end:
+#                 end_t = st.time_input("End Time", value=time(10, 0), key="new_schedule_end_time")
+#                 st.write(f"Ends at: **{end_t.strftime('%I:%M %p').lstrip('0')}**")
+
+#             location = st.text_input("Location (Zoom or Physical Room)", key="new_schedule_location")
+
+#         else:
+#             # Weekly or Monthly
+#             st.write("Select multiple days, each with its own time and location.")
+#             selected_days = st.multiselect(
+#                 "Days of Week",
+#                 ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+#                 key="new_schedule_selected_days"
+#             )
+#             for d in selected_days:
+#                 st.write(f"**Times/Location for {d}**")
+#                 col1, col2 = st.columns(2)
+
+#                 # Use a unique key that includes the day
+#                 start_for_day = col1.time_input(
+#                     f"{d} Start",
+#                     value=time(9, 0),
+#                     key=f"{d}_start_time"
+#                 )
+#                 col1.write(f"Starts at: **{start_for_day.strftime('%I:%M %p').lstrip('0')}**")
+
+#                 end_for_day = col2.time_input(
+#                     f"{d} End",
+#                     value=time(10, 0),
+#                     key=f"{d}_end_time"
+#                 )
+#                 col2.write(f"Ends at: **{end_for_day.strftime('%I:%M %p').lstrip('0')}**")
+
+#                 loc_for_day = st.text_input(
+#                     f"{d} Location",
+#                     "",
+#                     key=f"{d}_loc"
+#                 )
+
+#                 days_times.append({
+#                     "day": d,
+#                     "start_time": str(start_for_day),
+#                     "end_time": str(end_for_day),
+#                     "location": loc_for_day
+#                 })
+
+#         # "Create Schedule" button
+#         if st.button("Create Schedule", key="btn_create_schedule"):
+#             if recurrence == "None":
+#                 start_dt = datetime.combine(chosen_date, start_t)
+#                 end_dt = datetime.combine(chosen_date, end_t)
+#                 doc = {
+#                     "instructor_id": instructor_id,
+#                     "program_id": selected_prog_id,
+#                     "title": title,
+#                     "recurrence": "None",
+#                     "notes": notes,
+#                     "start_datetime": start_dt,
+#                     "end_datetime": end_dt,
+#                     "days_times": [],
+#                     "location": location,
+#                     "created_by_username": st.session_state.get("username", "Admin"),
+#                     "created_at": datetime.utcnow(),
+#                 }
+#             else:
+#                 doc = {
+#                     "instructor_id": instructor_id,
+#                     "program_id": selected_prog_id,
+#                     "title": title,
+#                     "recurrence": recurrence,
+#                     "notes": notes,
+#                     "days_times": days_times,
+#                     "start_datetime": None,
+#                     "end_datetime": None,
+#                     "created_by_username": st.session_state.get("username", "Admin"),
+#                     "created_at": datetime.utcnow(),
+
+#                 }
+
+#             new_id = create_schedule(doc)
+#             st.success(f"Created schedule with ID: {new_id}")
+
+#             # Send notifications to that program’s students
+#             notify_schedule_change(selected_prog_id, doc, event_type="created")
+#             st.rerun()
+
+#     ##################################################
+#     # B) Show Existing Schedules
+#     ##################################################
+#     st.subheader("Existing Schedules")
+
+#     # If admin wants to see all schedules, they'd omit instructor_id from the query
+#     all_schedules = list_schedules(instructor_id=instructor_id)
+#     if not all_schedules:
+#         st.info("No schedules found.")
+#         return
+
+#     # Filter schedules to only programs the user can manage
+#     filtered = [sch for sch in all_schedules if sch.get("program_id") in program_id_options]
+#     if not filtered:
+#         st.info("No schedules for your assigned programs.")
+#         return
+
+#     for sch in filtered:
+#         sid = sch["_id"]  # from Mongo
+#         pid = sch.get("program_id", None)
+#         prog_name = prog_map.get(pid, f"Unknown (ID={pid})")
+
+#         st.write("---")
+#         st.write(f"**Title**: {sch.get('title', '')} | **Program**: {prog_name}")
+#         st.write(f"**Recurrence**: {sch.get('recurrence', 'None')}")
+#         st.write(f"**Notes**: {sch.get('notes', '')}")
+        
+
+#         # If one-time, show start/end
+#         if sch.get("recurrence") == "None":
+#             start_text = _format_time_12h(sch.get("start_datetime"))
+#             end_text = _format_time_12h(sch.get("end_datetime"))
+#             st.write(f"**Date/Time**: {start_text} → {end_text}")
+#             if sch.get("location"):
+#                 st.write(f"**Location**: {sch['location']}")
+#         else:
+#             # Recurring
+#             dt_list = sch.get("days_times", [])
+#             if dt_list:
+#                 st.write("**Days/Times**:")
+#                 for d_obj in dt_list:
+#                     day = d_obj["day"]
+#                     s_24 = d_obj["start_time"]
+#                     e_24 = d_obj["end_time"]
+#                     s_12 = _format_time_12h(s_24)
+#                     e_12 = _format_time_12h(e_24)
+#                     loc = d_obj.get("location", "")
+#                     st.write(f"- {day}: {s_12} → {e_12}, Loc: {loc}")
+
+#         col1, col2 = st.columns(2)
+#         with col1:
+#             if st.button(f"Edit {sid}", key=f"edit_btn_{sid}"):
+#                 st.session_state["editing_schedule"] = sid
+#                 st.rerun()
+#         with col2:
+#             if st.button(f"Delete {sid}", key=f"delete_btn_{sid}"):
+#                 if delete_schedule(sid):
+#                     st.success("Schedule deleted.")
+#                     st.rerun()
+#                 else:
+#                     st.error("Delete failed or no such schedule.")
+
+#         ##################################################
+#         # C) Edit Form
+#         ##################################################
+#         editing_id = st.session_state.get("editing_schedule")
+#         if editing_id == sid:
+#             st.subheader(f"Editing Schedule: {editing_id}")
+#             schedule_doc = next((x for x in filtered if x["_id"] == editing_id), None)
+#             if not schedule_doc:
+#                 st.error("Schedule not found or not authorized.")
+#                 return
+
+#             old_title = schedule_doc.get("title", "")
+#             old_notes = schedule_doc.get("notes", "")
+#             old_recurrence = schedule_doc.get("recurrence", "None")
+#             old_location = schedule_doc.get("location", "")
+#             old_days_times = schedule_doc.get("days_times", [])
+#             old_program_id = schedule_doc.get("program_id", None)
+
+#             st.write("**Program**:", prog_map.get(old_program_id, f"Unknown (ID={old_program_id})"))
+
+#             new_title = st.text_input(
+#                 "Edit Title",
+#                 value=old_title,
+#                 key=f"edit_title_{sid}"
+#             )
+#             new_recurrence = st.selectbox(
+#                 "Recurrence",
+#                 ["None", "Weekly", "Monthly"],
+#                 index=["None", "Weekly", "Monthly"].index(old_recurrence),
+#                 key=f"edit_recurrence_{sid}"
+#             )
+#             new_notes = st.text_area(
+#                 "Edit Notes",
+#                 value=old_notes,
+#                 key=f"edit_notes_{sid}"
+#             )
+
+#             if new_recurrence == "None":
+#                 existing_start = schedule_doc.get("start_datetime")
+#                 existing_end = schedule_doc.get("end_datetime")
+
+#                 if isinstance(existing_start, str):
+#                     existing_start = parser.parse(existing_start)
+#                 if isinstance(existing_end, str):
+#                     existing_end = parser.parse(existing_end)
+
+#                 start_date_val = existing_start.date() if existing_start else date.today()
+#                 start_time_val = existing_start.time() if existing_start else time(9, 0)
+#                 end_date_val = existing_end.date() if existing_end else date.today()
+#                 end_time_val = existing_end.time() if existing_end else time(10, 0)
+
+#                 # Unique keys for each widget
+#                 edited_start_date = st.date_input(
+#                     "Start Date",
+#                     value=start_date_val,
+#                     key=f"edit_start_date_{sid}"
+#                 )
+#                 edited_start_time = st.time_input(
+#                     "Start Time",
+#                     value=start_time_val,
+#                     key=f"edit_start_time_{sid}"
+#                 )
+
+#                 edited_end_date = st.date_input(
+#                     "End Date",
+#                     value=end_date_val,
+#                     key=f"edit_end_date_{sid}"
+#                 )
+#                 edited_end_time = st.time_input(
+#                     "End Time",
+#                     value=end_time_val,
+#                     key=f"edit_end_time_{sid}"
+#                 )
+#                 edited_location = st.text_input(
+#                     "Location",
+#                     value=old_location,
+#                     key=f"edit_location_{sid}"
+#                 )
+#                 new_days_times = []
+#             else:
+#                 # Recurring
+#                 old_selected_days = [d["day"] for d in old_days_times]
+#                 selected_days = st.multiselect(
+#                     "Days of Week",
+#                     ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+#                     default=old_selected_days,
+#                     key=f"edit_selected_days_{sid}"
+#                 )
+
+#                 new_days_times = []
+#                 for d in selected_days:
+#                     existing = next((x for x in old_days_times if x["day"] == d), None)
+#                     default_start = time(9, 0)
+#                     default_end = time(10, 0)
+#                     default_loc = ""
+
+#                     if existing:
+#                         # parse existing strings e.g. "09:00:00"
+#                         if "start_time" in existing:
+#                             try:
+#                                 hh, mm, ss = existing["start_time"].split(":")
+#                                 default_start = time(int(hh), int(mm))
+#                             except:
+#                                 pass
+#                         if "end_time" in existing:
+#                             try:
+#                                 hh, mm, ss = existing["end_time"].split(":")
+#                                 default_end = time(int(hh), int(mm))
+#                             except:
+#                                 pass
+#                         default_loc = existing.get("location", "")
+
+#                     st.write(f"**Times/Location for {d}**")
+#                     col_a, col_b = st.columns(2)
+
+#                     new_start = col_a.time_input(
+#                         f"{editing_id}_{d}_start",
+#                         value=default_start,
+#                         key=f"{editing_id}_{d}_start_key"
+#                     )
+#                     col_a.write(f"Starts at: **{new_start.strftime('%I:%M %p').lstrip('0')}**")
+
+#                     new_end = col_a.time_input(
+#                         f"{editing_id}_{d}_end",
+#                         value=default_end,
+#                         key=f"{editing_id}_{d}_end_key"
+#                     )
+#                     col_a.write(f"Ends at: **{new_end.strftime('%I:%M %p').lstrip('0')}**")
+
+#                     new_loc = col_b.text_input(
+#                         f"{editing_id}_{d}_loc",
+#                         value=default_loc,
+#                         key=f"{editing_id}_{d}_loc_key"
+#                     )
+
+#                     new_days_times.append({
+#                         "day": d,
+#                         "start_time": str(new_start),  # store "HH:MM:SS"
+#                         "end_time": str(new_end),
+#                         "location": new_loc
+#                     })
+
+#                 edited_location = None
+
+#             # Save Changes button
+#             if st.button("Save Changes", key=f"save_changes_btn_{sid}"):
+#                 updates = {
+#                     "title": new_title,
+#                     "recurrence": new_recurrence,
+#                     "notes": new_notes
+#                 }
+                
+#                 if new_recurrence == "None":
+#                     updates["days_times"] = []
+#                     s_dt = datetime.combine(edited_start_date, edited_start_time)
+#                     e_dt = datetime.combine(edited_end_date, edited_end_time)
+#                     updates["start_datetime"] = s_dt
+#                     updates["end_datetime"] = e_dt
+#                     updates["location"] = edited_location
+#                 else:
+#                     updates["days_times"] = new_days_times
+#                     updates["start_datetime"] = None
+#                     updates["end_datetime"] = None
+#                     updates.pop("location", None)  # remove if used only for one-time
+
+#                 updates["updated_by_username"] = st.session_state.get("username", "Unknown")
+#                 updates["updated_at"] = datetime.utcnow()
+
+#                 success = update_schedule(editing_id, updates)
+#                 if success:
+#                     st.success("Schedule updated.")
+
+#                     # Rebuild a doc for email
+#                     updated_doc = {
+#                         "program_id": old_program_id,   # Must ensure old_program_id is known
+#                         "title": new_title,
+#                         "recurrence": new_recurrence,
+#                         "notes": new_notes,
+#                         "days_times": new_days_times if new_recurrence != "None" else [],
+#                         "location": edited_location if new_recurrence == "None" else None,
+#                     }
+#                     notify_schedule_change(
+#                         program_id=old_program_id,
+#                         schedule_doc=updated_doc,
+#                         event_type="updated"
+#                     )
+#                 else:
+#                     st.error("No changes made, or update failed.")
+
+#                 st.session_state.pop("editing_schedule", None)
+#                 st.rerun()
 
 # def page_manage_schedules():
 #     """
