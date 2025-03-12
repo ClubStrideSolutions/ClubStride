@@ -500,7 +500,7 @@ def page_manage_students():
 
                         # Clear from session
                         st.session_state.pop("attendance_student")
-                        st.session_state.pop("attendance_mode")
+                        st.session_state.pop("attendance_mode", None)
                         st.rerun()
 
                     if st.button("Cancel", key="single_attendance_cancel"):
@@ -535,7 +535,7 @@ def page_manage_students():
                             st.error(f"Error: {e}")
 
                         st.session_state.pop("attendance_student")
-                        st.session_state.pop("attendance_mode")
+                        st.session_state.pop("attendance_mode", None)
                         st.rerun()
 
                     if st.button("Cancel Past", key="past_single_cancel"):
