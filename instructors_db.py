@@ -387,3 +387,35 @@ def delete_program(program_id: int) -> bool:
     finally:
         cursor.close()
         conn.close()
+
+def update_program(program_id: int, new_program_name: str) -> bool:
+    """
+    Update the name of a program, given its program_id.
+    Returns True if the program was updated, or False if the program_id does not exist
+    or if there's a database error.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            UPDATE programs
+            SET program_name = %s
+            WHERE program_id = %s
+            """,
+            (new_program_name, program_id)
+        )
+        if cursor.rowcount == 0:
+            # rowcount == 0 means no rows were updated (invalid program_id)
+            conn.rollback()
+            return False
+
+        conn.commit()
+        return True
+    except psycopg2.Error as e:
+        print("Error updating program:", e)
+        conn.rollback()
+        return False
+    finally:
+        cursor.close()
+        conn.close()

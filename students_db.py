@@ -329,6 +329,122 @@ def update_student_info(student_id: str, new_name: str, new_phone: str,
     return result.modified_count > 0
 
 
+# def record_student_attendance_in_array(name, program_id, status, comment=None, attendance_date=None):
+#     db = connect_to_db()
+#     coll = db["Student_Records"]
+#     student_id = generate_student_id(name, program_id)
+
+#     # 1) If "Absent," increment missed_count by 1
+#     missed_inc = 1 if status == "Absent" else 0
+
+#     # 2) Upsert in case doc doesn't exist
+#     coll.update_one(
+#         {"student_id": student_id},
+#         {
+#             "$setOnInsert": {
+#                 "name": name,
+#                 "program_id": program_id,
+#                 "phone": "",
+#                 "contact_email": "",  # Student's email
+#                 # "parent_email": "",   # (unused now, but left for reference)
+#                 "missed_count": 0,
+#                 "grade": "",        # Optionally you can default them too
+#                 "school": ""
+#             }
+#         },
+#         upsert=True
+#     )
+    
+#     if attendance_date is None:
+#         attendance_date = datetime.utcnow()
+#     # 3) Build attendance sub-doc
+#     attendance_entry = {
+#         "date": attendance_date,
+#         "status": status,
+#         "comment": comment
+#     }
+
+#     # 4) Push + inc missed_count if absent
+#     coll.update_one(
+#         {"student_id": student_id},
+#         {
+#             "$push": {"attendance": attendance_entry},
+#             "$inc": {"missed_count": missed_inc}
+#         }
+#     )
+
+#     # 5) Retrieve updated doc, possibly send email
+#     doc = coll.find_one(
+#         {"student_id": student_id},
+#         # Now fetch contact_email, not parent_email
+#         {"missed_count": 1, "contact_email": 1, "name": 1}
+#     )
+#     new_missed = doc.get("missed_count", 0)
+#     student_email = doc.get("contact_email", "")
+#     student_name = doc.get("name", "")
+
+#     # 6) If absent, maybe send email to the student
+    
+#     if missed_inc == 1 and student_email:
+#         program_list = list_programs()
+#         prog_map = {p["program_id"]: p["program_name"] for p in program_list}
+#         program_name = prog_map.get(program_id, f"Program ID={program_id}")
+#         absent_date_str = attendance_date.strftime("%B %d, %Y")  
+#         google_form_link = "https://docs.google.com/forms/d/e/1FAIpQLSdeM6AUXXcCK3mNWaCQFrnoc-fmjFC615sh4cMGJ04iLGua1g/viewform?usp=dialog"  # Update your form link
+
+#         # Customize the subject/body text as you see fit
+#         if new_missed == 1:
+#             subject = f"[1st Absence] {student_name} missed {program_name} on {absent_date_str}"
+#             body = (
+#                 f"Hello {student_name},\n\n"
+#                 f"You missed our {program_name} session on {absent_date_str}. "
+#                 "If you had a valid excuse, please submit it here:\n"
+#                 f"\n{google_form_link}\n\n"
+#                 "Thank you,\n"
+#                 "Club Stride Team"
+#             )
+#         elif new_missed == 2:
+#             subject = f"[2nd Absence] {student_name} missed {program_name} again on {absent_date_str}"
+#             body = (
+#                 f"Hello {student_name},\n\n"
+#                 f"You've now missed two {program_name} sessions. The latest absence was {absent_date_str}..."
+#                 "If you miss one more, you may be removed from the program. Please submit an excuse:\n"
+#                 f"{google_form_link}\n\n"
+#                 "Thank you,\n"
+#                 "Club Stride Team"
+#             )
+#         elif new_missed == 3:
+#             subject = f"3rd Absence: {student_name}"
+#             body = (
+#                 f"Hello {student_name},\n\n"
+#                 f"You have missed three {program_name} sessions. The latest absence was {absent_date_str}..."
+#                 "We will contact you directly. "
+#                 "If you had a valid excuse, you can still submit it here:\n"
+#                 f"{google_form_link}\n\n"
+#                 "Thank you,\n"
+#                 "Club Stride Team"
+#             )
+#         else:
+#             subject = f"{student_name} has missed {new_missed} {program_name} sessions"
+#             body = (
+#                 f"Hello {student_name},\n\n"
+#                 f"You have missed {new_missed} sessions. Please contact us or "
+#                 f"submit an excuse:\n{google_form_link}\n\n"
+#                 "Thank you,\n"
+#                 "Club Stride Team"
+#             )
+
+#         # Now call the email function with the student’s email
+#         send_missed_alert_email(
+#             student_email=student_email,
+#             student_name=student_name,
+#             program_name=program_id,
+#             subject_line=subject,
+#             body_text=body
+#         )
+
+#     return f"Updated attendance for student_id={student_id} (status={status})"
+
 def record_student_attendance_in_array(name, program_id, status, comment=None, attendance_date=None):
     db = connect_to_db()
     coll = db["Student_Records"]
@@ -357,6 +473,25 @@ def record_student_attendance_in_array(name, program_id, status, comment=None, a
     
     if attendance_date is None:
         attendance_date = datetime.utcnow()
+
+    # --- NEW STEP: Block duplicates if there's already an attendance record for this day ---
+    day_start = attendance_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end = day_start + timedelta(days=1)
+
+    existing_for_day = coll.find_one({
+        "student_id": student_id,
+        "attendance": {
+            "$elemMatch": {
+                "date": {
+                    "$gte": day_start,
+                    "$lt": day_end
+                }
+            }
+        }
+    })
+    if existing_for_day:
+        return f"❌ Attendance for {name} is already recorded on {day_start.strftime('%Y-%m-%d')}."
+
     # 3) Build attendance sub-doc
     attendance_entry = {
         "date": attendance_date,
@@ -384,7 +519,6 @@ def record_student_attendance_in_array(name, program_id, status, comment=None, a
     student_name = doc.get("name", "")
 
     # 6) If absent, maybe send email to the student
-    
     if missed_inc == 1 and student_email:
         program_list = list_programs()
         prog_map = {p["program_id"]: p["program_name"] for p in program_list}
@@ -444,7 +578,6 @@ def record_student_attendance_in_array(name, program_id, status, comment=None, a
         )
 
     return f"Updated attendance for student_id={student_id} (status={status})"
-
 
 def send_missed_alert_email(student_email: str,
                             student_name: str,

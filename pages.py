@@ -23,6 +23,7 @@ from instructors_db import (
     remove_instructor_from_program,
     list_instructor_programs,
     add_instructor,
+    update_program,
     update_instructor_role,
     delete_instructor,
     authenticate_instructor,
@@ -102,75 +103,113 @@ def get_permitted_program_names():
 #####################
 # PAGE: Manage Instructors
 #####################
+
 def page_manage_instructors():
     st.header("Manage Instructors - Normalized Programs")
     initialize_tables()
-    Programs_Col, Instructors_Col = st.columns([2,2])
+
+    # Track which program is being edited (None = no active edits)
+    if "editing_program_id" not in st.session_state:
+        st.session_state["editing_program_id"] = None
+
+    Programs_Col, Instructors_Col = st.columns([2, 2])
+
+    ##################################################
+    # LEFT COLUMN: MANAGE PROGRAMS
+    ##################################################
     with Programs_Col:
         with st.expander("Manage Programs"):
-        # st.subheader("Add a New Program")
+            # --- CREATE NEW PROGRAM ---
             with st.form("add_program_form"):
-                # new_prog_name = st.text_input("New Program Name", "")
-                new_prog_name = st.text_input("New Program Name", value="") #, key="prog_name_field"
-
+                new_prog_name = st.text_input("New Program Name", value="")
                 submitted_prog = st.form_submit_button("Create Program")
 
-            if submitted_prog:#st.button("Create Program"):
+            if submitted_prog:
                 if new_prog_name.strip():
                     program_id = add_program(new_prog_name.strip())
                     if program_id == -1:
                         st.error("A program with that name already exists.")
                     else:
                         st.success(f"Program created (ID={program_id}).")
-                        # st.session_state["prog_name_field"] = ""
-
-                        
                         st.rerun()
                 else:
                     st.warning("Program name cannot be empty.")
 
             st.subheader("Current Programs")
             all_programs = list_programs()  # e.g. [{"program_id":..., "program_name":...}, ...]
+
             if not all_programs:
                 st.info("No programs found.")
             else:
                 for prog in all_programs:
                     pid = prog["program_id"]
                     pname = prog["program_name"]
-                    
-                    colA, colB = st.columns([4,1])
+
+                    colA, colB, colC = st.columns([2, 1, 1])
                     with colA:
                         st.write(f"- **{pname}** (ID={pid})")
 
+                    # --- EDIT BUTTON ---
                     with colB:
-                        # confirm = st.warning(f"Are you sure you want to delete {pname} (ID={pid})?", icon="⚠️")
-                        if st.button(f"Delete Program {pid}", key=f"delete_prog_{pid}"):
-                            
+                        if st.button(f"Edit", key=f"edit_prog_{pid}"):
+                            st.session_state["editing_program_id"] = pid
+                            st.rerun()
+
+                    # --- DELETE BUTTON ---
+                    with colC:
+                        if st.button(f"Delete", key=f"delete_prog_{pid}"):
                             if delete_program(pid):
                                 st.success(f"Program '{pname}' deleted.")
                             else:
                                 st.error(f"Could not delete program {pname}.")
                             st.rerun()
+
+                    # --- IF THIS PROGRAM IS BEING EDITED, SHOW A RENAME FIELD ---
+                    if st.session_state["editing_program_id"] == pid:
+                        new_name = st.text_input(
+                            "Rename Program",
+                            value=pname,
+                            key=f"rename_prog_{pid}"
+                        )
+                        save_col, cancel_col = st.columns(2)
+                        with save_col:
+                            if st.button("Save Name", key=f"save_rename_{pid}"):
+                                if not new_name.strip():
+                                    st.error("Program name cannot be empty.")
+                                else:
+                                    success = update_program(pid, new_name.strip())
+                                    if success:
+                                        st.success(f"Renamed program to '{new_name}'")
+                                    else:
+                                        st.error("Rename failed (maybe duplicate name or invalid ID).")
+                                # Clear edit state & refresh
+                                st.session_state["editing_program_id"] = None
+                                st.rerun()
+
+                        with cancel_col:
+                            if st.button("Cancel", key=f"cancel_rename_{pid}"):
+                                st.session_state["editing_program_id"] = None
+                                st.info("Edit canceled.")
+                                st.rerun()
+
+    ##################################################
+    # RIGHT COLUMN: MANAGE INSTRUCTORS
+    ##################################################
     with Instructors_Col:
         with st.expander("Add a New Instructor"):
-        # st.subheader("Add a New Instructor")
             with st.form("add_instructor_form"):
-
-                uname = st.text_input("Username") #, key="uname"
-                pwd = st.text_input("Password", type="password") #, key="pwd"
-                role = st.selectbox("Role", ["Instructor", "Manager", "Admin"]) #, key="role_select"
+                uname = st.text_input("Username")
+                pwd = st.text_input("Password", type="password")
+                role = st.selectbox("Role", ["Instructor", "Manager", "Admin"])
                 submitted = st.form_submit_button("Create Instructor")
 
-            if submitted:#st.button("Create Instructor", key="create_instructor"):
+            if submitted:
                 success = add_instructor(uname, pwd, role)
                 if success:
                     st.success("Instructor created successfully!")
                     st.rerun()
-                    
                 else:
                     st.error("User might already exist or an error occurred.")
-
-        # st.subheader("Current Instructors")
 
     instructors = list_instructors()
     if not instructors:
@@ -180,23 +219,23 @@ def page_manage_instructors():
     all_programs = list_programs()
     prog_dict = {p["program_id"]: p["program_name"] for p in all_programs}
     st.subheader("Current Instructors")
+
+    # ----------------------------------------------------
+    # For each instructor, show actions in an expander
+    # ----------------------------------------------------
     for instr in instructors:
         instr_id = instr["instructor_id"]
         username = instr["username"]
         role = instr["role"]
 
-        # Wrap each instructor’s controls in a collapsible expander
         with st.expander(f"{username} (ID={instr_id} | Role={role})"):
-            # st.write(f"{username} (ID={instr_id} | Role={role})")
-            
-            # 1. Role Update
+            # (1) Update Role
             st.write("### Update Role")
-            col_role, col_mid, col_out = st.columns([3,1,1])
-            
+            col_role, col_spacer, col_del = st.columns([3, 1, 1])
             with col_role:
                 new_role = st.selectbox(
-                    label="Select New Role",
-                    options=["Instructor", "Manager", "Admin"],
+                    "Select New Role",
+                    ["Instructor", "Manager", "Admin"],
                     index=["Instructor", "Manager", "Admin"].index(role),
                     key=f"role_{instr_id}"
                 )
@@ -204,31 +243,29 @@ def page_manage_instructors():
                     update_instructor_role(instr_id, new_role)
                     st.success(f"Updated role for {username} to {new_role}.")
                     st.rerun()
-            
-            # with col_delete:
-            if st.button(f"Delete Instructor", key=f"btn_delete_{instr_id}"):
-                success = delete_instructor(instr_id)
-                if success:
-                    st.success(f"Instructor {username} deleted.")
-                else:
-                    st.error("Delete failed or instructor not found.")
-                st.rerun()
+
+            # (2) Delete Instructor
+            with col_del:
+                if st.button("Delete Instructor", key=f"btn_delete_{instr_id}"):
+                    success = delete_instructor(instr_id)
+                    if success:
+                        st.success(f"Instructor {username} deleted.")
+                    else:
+                        st.error("Delete failed or instructor not found.")
+                    st.rerun()
 
             st.write("---")
-            
-            # 2. Assigned Programs
+
+            # (3) Assigned Programs
             st.write("### Assigned Programs")
             assigned = list_instructor_programs(instr_id)
-
             if not assigned:
                 st.write("No programs assigned yet.")
             else:
                 for a in assigned:
                     prog_id = a["program_id"]
                     prog_name = a["program_name"]
-
-                    # One row with program label on left, 'Remove' button on right
-                    c1, c2 = st.columns([4,1])
+                    c1, c2 = st.columns([4, 1])
                     with c1:
                         st.write(f"- **{prog_name}** (ID={prog_id})")
                     with c2:
@@ -237,26 +274,27 @@ def page_manage_instructors():
                             st.warning(f"Removed {prog_name} from {username}")
                             st.rerun()
 
-            st.write("---") 
-            # with st.expander("Reset Password"):
+            st.write("---")
+
+            # (4) Reset Password
             st.write("Set a new password for this instructor.")
             new_pass = st.text_input("New Password", type="password", key=f"pwd_reset_{instr_id}")
             if st.button("Confirm Password Reset", key=f"confirm_reset_{instr_id}"):
-                if not new_pass:
+                if not new_pass.strip():
                     st.error("Password cannot be empty.")
                 else:
                     update_instructor_password(instr_id, new_pass)
                     st.success(f"Password reset for {username}.")
 
-            st.write("---") 
-            # 3. Assign a New Program
-            col_assign, assign_mid, assign_out = st.columns([3,1,1])
+            st.write("---")
 
+            # (5) Assign a New Program
             st.write("### Assign a New Program")
+            col_assign, _, _ = st.columns([3, 1, 1])
             with col_assign:
                 selectable_ids = [p["program_id"] for p in all_programs]
                 choice = st.selectbox(
-                    label="Select a Program to Assign",
+                    "Select a Program to Assign",
                     options=selectable_ids,
                     format_func=lambda x: prog_dict[x],
                     key=f"addprog_{instr_id}"
@@ -265,6 +303,170 @@ def page_manage_instructors():
                     assign_instructor_to_program(instr_id, choice)
                     st.success(f"Assigned Program {prog_dict[choice]} (ID={choice}) to {username}")
                     st.rerun()
+
+# def page_manage_instructors():
+#     st.header("Manage Instructors - Normalized Programs")
+#     initialize_tables()
+#     Programs_Col, Instructors_Col = st.columns([2,2])
+#     with Programs_Col:
+#         with st.expander("Manage Programs"):
+#         # st.subheader("Add a New Program")
+#             with st.form("add_program_form"):
+#                 # new_prog_name = st.text_input("New Program Name", "")
+#                 new_prog_name = st.text_input("New Program Name", value="") #, key="prog_name_field"
+
+#                 submitted_prog = st.form_submit_button("Create Program")
+
+#             if submitted_prog:#st.button("Create Program"):
+#                 if new_prog_name.strip():
+#                     program_id = add_program(new_prog_name.strip())
+#                     if program_id == -1:
+#                         st.error("A program with that name already exists.")
+#                     else:
+#                         st.success(f"Program created (ID={program_id}).")
+#                         # st.session_state["prog_name_field"] = ""
+
+                        
+#                         st.rerun()
+#                 else:
+#                     st.warning("Program name cannot be empty.")
+
+#             st.subheader("Current Programs")
+#             all_programs = list_programs()  # e.g. [{"program_id":..., "program_name":...}, ...]
+#             if not all_programs:
+#                 st.info("No programs found.")
+#             else:
+#                 for prog in all_programs:
+#                     pid = prog["program_id"]
+#                     pname = prog["program_name"]
+                    
+#                     colA, colB = st.columns([4,1])
+#                     with colA:
+#                         st.write(f"- **{pname}** (ID={pid})")
+
+#                     with colB:
+#                         # confirm = st.warning(f"Are you sure you want to delete {pname} (ID={pid})?", icon="⚠️")
+#                         if st.button(f"Delete Program {pid}", key=f"delete_prog_{pid}"):
+                            
+#                             if delete_program(pid):
+#                                 st.success(f"Program '{pname}' deleted.")
+#                             else:
+#                                 st.error(f"Could not delete program {pname}.")
+#                             st.rerun()
+#     with Instructors_Col:
+#         with st.expander("Add a New Instructor"):
+#         # st.subheader("Add a New Instructor")
+#             with st.form("add_instructor_form"):
+
+#                 uname = st.text_input("Username") #, key="uname"
+#                 pwd = st.text_input("Password", type="password") #, key="pwd"
+#                 role = st.selectbox("Role", ["Instructor", "Manager", "Admin"]) #, key="role_select"
+#                 submitted = st.form_submit_button("Create Instructor")
+
+#             if submitted:#st.button("Create Instructor", key="create_instructor"):
+#                 success = add_instructor(uname, pwd, role)
+#                 if success:
+#                     st.success("Instructor created successfully!")
+#                     st.rerun()
+                    
+#                 else:
+#                     st.error("User might already exist or an error occurred.")
+
+#         # st.subheader("Current Instructors")
+
+#     instructors = list_instructors()
+#     if not instructors:
+#         st.info("No instructors found.")
+#         st.stop()
+
+#     all_programs = list_programs()
+#     prog_dict = {p["program_id"]: p["program_name"] for p in all_programs}
+#     st.subheader("Current Instructors")
+#     for instr in instructors:
+#         instr_id = instr["instructor_id"]
+#         username = instr["username"]
+#         role = instr["role"]
+
+#         # Wrap each instructor’s controls in a collapsible expander
+#         with st.expander(f"{username} (ID={instr_id} | Role={role})"):
+#             # st.write(f"{username} (ID={instr_id} | Role={role})")
+            
+#             # 1. Role Update
+#             st.write("### Update Role")
+#             col_role, col_mid, col_out = st.columns([3,1,1])
+            
+#             with col_role:
+#                 new_role = st.selectbox(
+#                     label="Select New Role",
+#                     options=["Instructor", "Manager", "Admin"],
+#                     index=["Instructor", "Manager", "Admin"].index(role),
+#                     key=f"role_{instr_id}"
+#                 )
+#                 if st.button("Update Role", key=f"btn_role_{instr_id}"):
+#                     update_instructor_role(instr_id, new_role)
+#                     st.success(f"Updated role for {username} to {new_role}.")
+#                     st.rerun()
+            
+#             # with col_delete:
+#             if st.button(f"Delete Instructor", key=f"btn_delete_{instr_id}"):
+#                 success = delete_instructor(instr_id)
+#                 if success:
+#                     st.success(f"Instructor {username} deleted.")
+#                 else:
+#                     st.error("Delete failed or instructor not found.")
+#                 st.rerun()
+
+#             st.write("---")
+            
+#             # 2. Assigned Programs
+#             st.write("### Assigned Programs")
+#             assigned = list_instructor_programs(instr_id)
+
+#             if not assigned:
+#                 st.write("No programs assigned yet.")
+#             else:
+#                 for a in assigned:
+#                     prog_id = a["program_id"]
+#                     prog_name = a["program_name"]
+
+#                     # One row with program label on left, 'Remove' button on right
+#                     c1, c2 = st.columns([4,1])
+#                     with c1:
+#                         st.write(f"- **{prog_name}** (ID={prog_id})")
+#                     with c2:
+#                         if st.button("Remove", key=f"remove_{instr_id}_{prog_id}"):
+#                             remove_instructor_from_program(instr_id, prog_id)
+#                             st.warning(f"Removed {prog_name} from {username}")
+#                             st.rerun()
+
+#             st.write("---") 
+#             # with st.expander("Reset Password"):
+#             st.write("Set a new password for this instructor.")
+#             new_pass = st.text_input("New Password", type="password", key=f"pwd_reset_{instr_id}")
+#             if st.button("Confirm Password Reset", key=f"confirm_reset_{instr_id}"):
+#                 if not new_pass:
+#                     st.error("Password cannot be empty.")
+#                 else:
+#                     update_instructor_password(instr_id, new_pass)
+#                     st.success(f"Password reset for {username}.")
+
+#             st.write("---") 
+#             # 3. Assign a New Program
+#             col_assign, assign_mid, assign_out = st.columns([3,1,1])
+
+#             st.write("### Assign a New Program")
+#             with col_assign:
+#                 selectable_ids = [p["program_id"] for p in all_programs]
+#                 choice = st.selectbox(
+#                     label="Select a Program to Assign",
+#                     options=selectable_ids,
+#                     format_func=lambda x: prog_dict[x],
+#                     key=f"addprog_{instr_id}"
+#                 )
+#                 if st.button("Assign Program", key=f"btn_assign_{instr_id}"):
+#                     assign_instructor_to_program(instr_id, choice)
+#                     st.success(f"Assigned Program {prog_dict[choice]} (ID={choice}) to {username}")
+#                     st.rerun()
 
 
 
