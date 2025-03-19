@@ -11,7 +11,7 @@ import pandas as pd
 from datetime import datetime, time, date,timedelta
 from dateutil import parser
 import plotly.express as px
-
+import io
 
 
 from instructors_db import (
@@ -51,6 +51,7 @@ from students_db import (
 from schedules_db import (
     create_schedule,
     list_schedules,
+    list_schedules_by_program,
     update_schedule,
     notify_schedule_change,
     delete_schedule
@@ -64,6 +65,13 @@ from schedules_db import (
 
 import streamlit as st
 from datetime import datetime, time, date
+
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+import io
+from datetime import datetime
+
 
 def _format_time_12h(t):
     """
@@ -303,171 +311,6 @@ def page_manage_instructors():
                     assign_instructor_to_program(instr_id, choice)
                     st.success(f"Assigned Program {prog_dict[choice]} (ID={choice}) to {username}")
                     st.rerun()
-
-# def page_manage_instructors():
-#     st.header("Manage Instructors - Normalized Programs")
-#     initialize_tables()
-#     Programs_Col, Instructors_Col = st.columns([2,2])
-#     with Programs_Col:
-#         with st.expander("Manage Programs"):
-#         # st.subheader("Add a New Program")
-#             with st.form("add_program_form"):
-#                 # new_prog_name = st.text_input("New Program Name", "")
-#                 new_prog_name = st.text_input("New Program Name", value="") #, key="prog_name_field"
-
-#                 submitted_prog = st.form_submit_button("Create Program")
-
-#             if submitted_prog:#st.button("Create Program"):
-#                 if new_prog_name.strip():
-#                     program_id = add_program(new_prog_name.strip())
-#                     if program_id == -1:
-#                         st.error("A program with that name already exists.")
-#                     else:
-#                         st.success(f"Program created (ID={program_id}).")
-#                         # st.session_state["prog_name_field"] = ""
-
-                        
-#                         st.rerun()
-#                 else:
-#                     st.warning("Program name cannot be empty.")
-
-#             st.subheader("Current Programs")
-#             all_programs = list_programs()  # e.g. [{"program_id":..., "program_name":...}, ...]
-#             if not all_programs:
-#                 st.info("No programs found.")
-#             else:
-#                 for prog in all_programs:
-#                     pid = prog["program_id"]
-#                     pname = prog["program_name"]
-                    
-#                     colA, colB = st.columns([4,1])
-#                     with colA:
-#                         st.write(f"- **{pname}** (ID={pid})")
-
-#                     with colB:
-#                         # confirm = st.warning(f"Are you sure you want to delete {pname} (ID={pid})?", icon="⚠️")
-#                         if st.button(f"Delete Program {pid}", key=f"delete_prog_{pid}"):
-                            
-#                             if delete_program(pid):
-#                                 st.success(f"Program '{pname}' deleted.")
-#                             else:
-#                                 st.error(f"Could not delete program {pname}.")
-#                             st.rerun()
-#     with Instructors_Col:
-#         with st.expander("Add a New Instructor"):
-#         # st.subheader("Add a New Instructor")
-#             with st.form("add_instructor_form"):
-
-#                 uname = st.text_input("Username") #, key="uname"
-#                 pwd = st.text_input("Password", type="password") #, key="pwd"
-#                 role = st.selectbox("Role", ["Instructor", "Manager", "Admin"]) #, key="role_select"
-#                 submitted = st.form_submit_button("Create Instructor")
-
-#             if submitted:#st.button("Create Instructor", key="create_instructor"):
-#                 success = add_instructor(uname, pwd, role)
-#                 if success:
-#                     st.success("Instructor created successfully!")
-#                     st.rerun()
-                    
-#                 else:
-#                     st.error("User might already exist or an error occurred.")
-
-#         # st.subheader("Current Instructors")
-
-#     instructors = list_instructors()
-#     if not instructors:
-#         st.info("No instructors found.")
-#         st.stop()
-
-#     all_programs = list_programs()
-#     prog_dict = {p["program_id"]: p["program_name"] for p in all_programs}
-#     st.subheader("Current Instructors")
-#     for instr in instructors:
-#         instr_id = instr["instructor_id"]
-#         username = instr["username"]
-#         role = instr["role"]
-
-#         # Wrap each instructor’s controls in a collapsible expander
-#         with st.expander(f"{username} (ID={instr_id} | Role={role})"):
-#             # st.write(f"{username} (ID={instr_id} | Role={role})")
-            
-#             # 1. Role Update
-#             st.write("### Update Role")
-#             col_role, col_mid, col_out = st.columns([3,1,1])
-            
-#             with col_role:
-#                 new_role = st.selectbox(
-#                     label="Select New Role",
-#                     options=["Instructor", "Manager", "Admin"],
-#                     index=["Instructor", "Manager", "Admin"].index(role),
-#                     key=f"role_{instr_id}"
-#                 )
-#                 if st.button("Update Role", key=f"btn_role_{instr_id}"):
-#                     update_instructor_role(instr_id, new_role)
-#                     st.success(f"Updated role for {username} to {new_role}.")
-#                     st.rerun()
-            
-#             # with col_delete:
-#             if st.button(f"Delete Instructor", key=f"btn_delete_{instr_id}"):
-#                 success = delete_instructor(instr_id)
-#                 if success:
-#                     st.success(f"Instructor {username} deleted.")
-#                 else:
-#                     st.error("Delete failed or instructor not found.")
-#                 st.rerun()
-
-#             st.write("---")
-            
-#             # 2. Assigned Programs
-#             st.write("### Assigned Programs")
-#             assigned = list_instructor_programs(instr_id)
-
-#             if not assigned:
-#                 st.write("No programs assigned yet.")
-#             else:
-#                 for a in assigned:
-#                     prog_id = a["program_id"]
-#                     prog_name = a["program_name"]
-
-#                     # One row with program label on left, 'Remove' button on right
-#                     c1, c2 = st.columns([4,1])
-#                     with c1:
-#                         st.write(f"- **{prog_name}** (ID={prog_id})")
-#                     with c2:
-#                         if st.button("Remove", key=f"remove_{instr_id}_{prog_id}"):
-#                             remove_instructor_from_program(instr_id, prog_id)
-#                             st.warning(f"Removed {prog_name} from {username}")
-#                             st.rerun()
-
-#             st.write("---") 
-#             # with st.expander("Reset Password"):
-#             st.write("Set a new password for this instructor.")
-#             new_pass = st.text_input("New Password", type="password", key=f"pwd_reset_{instr_id}")
-#             if st.button("Confirm Password Reset", key=f"confirm_reset_{instr_id}"):
-#                 if not new_pass:
-#                     st.error("Password cannot be empty.")
-#                 else:
-#                     update_instructor_password(instr_id, new_pass)
-#                     st.success(f"Password reset for {username}.")
-
-#             st.write("---") 
-#             # 3. Assign a New Program
-#             col_assign, assign_mid, assign_out = st.columns([3,1,1])
-
-#             st.write("### Assign a New Program")
-#             with col_assign:
-#                 selectable_ids = [p["program_id"] for p in all_programs]
-#                 choice = st.selectbox(
-#                     label="Select a Program to Assign",
-#                     options=selectable_ids,
-#                     format_func=lambda x: prog_dict[x],
-#                     key=f"addprog_{instr_id}"
-#                 )
-#                 if st.button("Assign Program", key=f"btn_assign_{instr_id}"):
-#                     assign_instructor_to_program(instr_id, choice)
-#                     st.success(f"Assigned Program {prog_dict[choice]} (ID={choice}) to {username}")
-#                     st.rerun()
-
 
 
 #####################
@@ -1521,54 +1364,65 @@ def page_review_attendance():
 #####################
 # PAGE: Generate Reports with Pygwalker
 #####################
+
+
+def highlight_high_absences(row):
+    """
+    Called by df.style.apply() to highlight entire row if "Total Absences" > threshold.
+    Returns a list of style strings or '' for each cell in the row.
+    """
+    threshold = 3
+    if row.get("Total Absences", 0) > threshold:
+        return ["background-color: #ffcccc"] * len(row)
+    else:
+        return [""] * len(row)
+
+
 def page_generate_reports():
     st.header("Generate Reports")
 
-    # 1) Determine if user is admin or instructor
+    # 1) Admin or Instructor?
     is_admin = st.session_state.get("is_admin", False)
 
-    # 2) Build a dict {program_id -> program_name} from Postgres
-    all_programs = list_programs()  # e.g. [ {"program_id": 1, "program_name": "STEM"}, ... ]
+    # 2) Build program map from Postgres
+    all_programs = list_programs()  # e.g. [{"program_id":1,"program_name":"STEM"}, ...]
     prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
-        # Get current total
 
-    # 3) If instructor, get a list of permitted program IDs
+    # 3) Determine permitted program IDs
     if is_admin:
-        permitted_ids = None   # Admin sees all
+        program_id_options = [p["program_id"] for p in all_programs]  # admin sees all
     else:
-        permitted_ids = st.session_state.get("instructor_program_ids", [])
+        program_id_options = st.session_state.get("instructor_program_ids", [])
+        if not program_id_options:
+            st.warning("You have no assigned programs. Contact an admin for access.")
+            return
 
-    # 4) Fetch raw attendance records from Mongo
-    #    Each item has {"student_id", "name", "program_id", "attendance": {date, status, comment}}
+    # 4) Fetch attendance records from Mongo
     records = fetch_all_attendance_records()
     if not records:
         st.info("No attendance data found.")
         return
 
-    # 5) Filter by numeric program_id if not admin
-    if permitted_ids is not None:
-        records = [r for r in records if r.get("program_id") in permitted_ids]
-        if not records:
-            st.info("No attendance data found for your assigned programs.")
-            return
+    # 5) Filter by permitted program IDs
+    filtered_records = [r for r in records if r.get("program_id") in program_id_options]
+    if not filtered_records:
+        st.info("No attendance data found for your assigned programs.")
+        return
 
-    # 6) Flatten each record so 'attendance' sub-doc fields become top-level
+    # 6) Flatten records
     flattened = []
-    for r in records:
+    for r in filtered_records:
         att = r["attendance"]
-        pid = r.get("program_id", 0)   # Numeric program_id from Mongo
-
-        new_row = {
+        pid = r.get("program_id", 0)
+        flattened.append({
             "student_id": r.get("student_id"),
             "name": r.get("name"),
             "program_id": pid,
-            # Look up friendly program name from our dict
             "program_name": prog_map.get(pid, f"Program ID={pid}"),
             "date": att.get("date"),
             "status": att.get("status"),
             "comment": att.get("comment", "")
-        }
-        flattened.append(new_row)
+        })
 
     if not flattened:
         st.info("No valid attendance data to display.")
@@ -1579,11 +1433,11 @@ def page_generate_reports():
         st.info("No valid attendance data to display.")
         return
 
+    # -------------------------------------------------------------------------
+    # A) Admin-Only Visualizations (Overview)
+    # -------------------------------------------------------------------------
     if is_admin:
-
-        # st.help("Below are some prebuilt charts on the dataset.")
-        with st.expander("Admin Visualizations of Full Attendance Data"):
-        # 1) Convert 'status' to numeric: Present=1, Late=0.5, Absent=0
+        with st.expander("Admin Visualizations of Full Attendance Data", expanded=False):
             def status_to_numeric(s):
                 if s == "Present":
                     return 1
@@ -1594,7 +1448,7 @@ def page_generate_reports():
 
             df["attendance_value"] = df["status"].apply(status_to_numeric)
 
-            # 2) Group by program_name -> compute average attendance
+            # Ranking by average attendance
             ranking_df = df.groupby("program_name", as_index=False)["attendance_value"].mean()
             ranking_df.rename(columns={"attendance_value": "avg_attendance_score"}, inplace=True)
             ranking_df.sort_values("avg_attendance_score", ascending=False, inplace=True)
@@ -1602,55 +1456,37 @@ def page_generate_reports():
             st.subheader("Program Ranking by Average Attendance")
             st.table(ranking_df)
 
-            # PLOT #1: Bar chart of average attendance by program
+            # Bar chart: average attendance score
             fig_bar = px.bar(
                 ranking_df,
                 x="program_name",
                 y="avg_attendance_score",
                 title="Average Attendance Score by Program"
             )
-            # st.plotly_chart(fig_bar, use_container_width=True)
 
+            # Pie chart: overall status distribution
             status_counts = df["status"].value_counts().reset_index()
             status_counts.columns = ["status", "count"]
-
-            # st.subheader("Proportion of Attendance Statuses")
-            # st.write("A quick look at the distribution of Present, Late, and Absent overall. "
-            #         "Remember that pie charts can be misleading if too many slices are present.")
-            
             fig_pie = px.pie(
                 status_counts,
                 values="count",
                 names="status",
                 title="Distribution of Attendance Statuses",
-                hole=0.4  # optional "donut" style
+                hole=0.4
             )
-            fig_pie.update_layout(
-                width=500,   # adjust as needed
-                height=500   # adjust as needed
-            )
-            # st.plotly_chart(fig_pie, use_container_width=True)
 
-            # 3) Time series: overall attendance over time
-            # Ensure df["date"] is properly typed
+            # Time-series
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
             daily_df = df.groupby("date", as_index=False)["attendance_value"].mean()
-
             fig_line = px.line(
                 daily_df,
                 x="date",
                 y="attendance_value",
                 title="Average Attendance Over Time (All Programs)"
             )
-            fig_line.update_traces(line=dict(width=4))
 
-            # st.plotly_chart(fig_line, use_container_width=True)
-
-            # 4) Multi-line time series, color-coded by program
-            multi_df = (
-                df.groupby(["date", "program_name"], as_index=False)["attendance_value"]
-                    .mean()
-            )
+            # Multi-line by program
+            multi_df = df.groupby(["date", "program_name"], as_index=False)["attendance_value"].mean()
             fig_multi = px.line(
                 multi_df,
                 x="date",
@@ -1658,77 +1494,223 @@ def page_generate_reports():
                 color="program_name",
                 title="Attendance Over Time by Program"
             )
-            fig_multi.update_traces(line=dict(width=3))
 
-            # st.plotly_chart(fig_multi, use_container_width=True)
-
-            # First row: fig_bar (left), fig_pie (right)
-            row1_col1, row1_col2 = st.columns(2)
-
-            with row1_col1:
+            colA, colB = st.columns(2)
+            with colA:
                 st.subheader("Average Attendance Score by Program")
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-            with row1_col2:
+            with colB:
                 st.subheader("Proportion of Attendance Statuses")
-                # st.write(
-                #     "A quick look at the distribution of Present, Late, and Absent overall. "
-                #     "Remember that pie charts can be misleading if too many slices are present."
-                # )
                 st.plotly_chart(fig_pie, use_container_width=True)
 
             st.write("---")
-            # Second row: fig_line (left), fig_multi (right)
-            # row2_col1, row2_col2 = st.columns(2)
-
-            # with row2_col1:
             st.subheader("Average Attendance Over Time (All Programs)")
             st.plotly_chart(fig_line, use_container_width=True)
 
-            # with row2_col2:
             st.subheader("Attendance Over Time by Program")
             st.plotly_chart(fig_multi, use_container_width=True)
 
-
-    # 7) Let users explore the data with dataframe_explorer
+    # -------------------------------------------------------------------------
+    # B) Data Explorer + Chart Building from Filtered Data
+    # -------------------------------------------------------------------------
     with st.expander("Data Explorer"):
         explorer_output = dataframe_explorer(df, case=False)
         explorer_df = pd.DataFrame(explorer_output)
+
         if explorer_df.empty:
             st.info("No data selected in the explorer.")
         else:
             st.dataframe(explorer_df, use_container_width=True)
-
-    # 8) Visualize with PyGWalker
-    try:
-        with st.expander("Data Visualizer"):
-            components.html(
-                pyg.to_html(explorer_df, env="Streamlit"),
-                height=1000,
-                scrolling=True
+            st.markdown("### Build a Plotly Chart from the Filtered Data")
+            chart_type = st.selectbox(
+                "Select Chart Type",
+                [
+                    "Bar - Status Counts",
+                    "Line - Attendance Over Time",
+                    "Bar - Student Attendance",
+                    "Pie - Status Distribution",
+                    # "Scatter - Attendance vs. Date (Line)"  # example line scatter
+                ]
             )
-    except Exception as e:
-        st.info("No data selected in the visualizer.")
-    # 9) Generate Sweetviz report on the subset (explorer_df)
 
-    # After flattening 'df' with attendance data
-    
-    if st.button("Generate Sweetviz Report"):
-        report = sweetviz.analyze(explorer_df)
-        report_name = "sweetviz_report.html"
-        report.show_html(report_name, open_browser=False)
+            # Convert 'date' to datetime if needed
+            explorer_df["date"] = pd.to_datetime(explorer_df["date"], errors="coerce")
 
-        with open(report_name, "r", encoding="utf-8") as f:
-            sweetviz_html = f.read()
+            if chart_type == "Bar - Status Counts":
+                status_counts = explorer_df["status"].value_counts().reset_index()
+                status_counts.columns = ["status", "count"]
+                fig_bar_filter = px.bar(
+                    status_counts,
+                    x="status",
+                    y="count",
+                    title="Status Counts in Filtered Data"
+                )
+                st.plotly_chart(fig_bar_filter, use_container_width=True)
 
-        components.html(sweetviz_html, height=800, scrolling=True)
-        st.subheader("Download Sweetviz HTML")
-        st.download_button(
-            label="Download Sweetviz HTML",
-            data=sweetviz_html,
-            file_name="Sweetviz_Report.html",
-            mime="text/html",
+            elif chart_type == "Line - Attendance Over Time":
+                def status_to_numeric(s):
+                    if s == "Present":
+                        return 1
+                    elif s == "Late":
+                        return 0.5
+                    else:
+                        return 0
+                explorer_df["attendance_value"] = explorer_df["status"].apply(status_to_numeric)
+                daily_mean = explorer_df.groupby("date", as_index=False)["attendance_value"].mean().sort_values("date")
+                fig_line_filter = px.line(
+                    daily_mean,
+                    x="date",
+                    y="attendance_value",
+                    title="Average Attendance Over Time (Filtered Data)"
+                )
+                st.plotly_chart(fig_line_filter, use_container_width=True)
+
+            elif chart_type == "Bar - Student Attendance":
+                group_data = explorer_df.groupby(["name", "status"]).size().reset_index(name="count")
+                fig_bar_student = px.bar(
+                    group_data,
+                    x="name",
+                    y="count",
+                    color="status",
+                    barmode="group",
+                    title="Attendance by Student (Filtered Data)"
+                )
+                st.plotly_chart(fig_bar_student, use_container_width=True)
+
+            elif chart_type == "Pie - Status Distribution":
+                status_counts = explorer_df["status"].value_counts().reset_index()
+                status_counts.columns = ["status", "count"]
+                fig_pie_filter = px.pie(
+                    status_counts,
+                    values="count",
+                    names="status",
+                    title="Status Distribution (Filtered Data)",
+                    hole=0.4
+                )
+                st.plotly_chart(fig_pie_filter, use_container_width=True)
+
+            elif chart_type == "Scatter - Attendance vs. Date (Line)":
+                # line scatter approach
+                def status_to_numeric(s):
+                    if s == "Present":
+                        return 1
+                    elif s == "Late":
+                        return 0.5
+                    else:
+                        return 0
+                explorer_df["attendance_value"] = explorer_df["status"].apply(status_to_numeric)
+
+                fig_scatter_line = px.line(
+                    explorer_df,
+                    x="date",
+                    y="attendance_value",
+                    color="name",
+                    markers=True,  # so we see scatter points on the line
+                    title="Line Scatter: Attendance by Date (Filtered Data)"
+                )
+                st.plotly_chart(fig_scatter_line, use_container_width=True)
+
+    # -------------------------------------------------------------------------
+    # C) Program-Specific XLSX (with advanced insights)
+    # -------------------------------------------------------------------------
+    st.write("---")
+    st.subheader("Generate Program-Specific XLSX (with Total Absences + Advanced Insights)")
+
+    # Let user pick a program from df
+    selectable_pids = sorted(df["program_id"].unique())
+    selected_pid = st.selectbox(
+        "Select a Program to Export/Analyze",
+        options=selectable_pids,
+        format_func=lambda pid: prog_map.get(pid, f"Program ID={pid}")
+    )
+
+    if "pivot_df" not in st.session_state:
+        st.session_state["pivot_df"] = None
+
+    if st.button("Create Pivot + Insights"):
+        # Filter DF to chosen program
+        sub_df = df[df["program_id"] == selected_pid].copy()
+        if sub_df.empty:
+            st.warning("No attendance data for that program!")
+            return
+
+        sub_df["date"] = pd.to_datetime(sub_df["date"], errors="coerce").dt.date
+        pivot_df = sub_df.pivot(index="name", columns="date", values="status").fillna("Missed")
+
+        # Count absences
+        def count_absences(row):
+            return sum(x in ["Absent", "Missed"] for x in row)
+        pivot_df["Total Absences"] = pivot_df.apply(count_absences, axis=1)
+
+        st.session_state["pivot_df"] = pivot_df
+
+        # ---- Additional Summaries/Insights ----
+        total_students = len(pivot_df.index)
+        average_absences = pivot_df["Total Absences"].mean()
+        max_absences = pivot_df["Total Absences"].max()
+
+        st.write(f"**Total Students:** {total_students}")
+        st.write(f"**Average Absences:** {average_absences:.2f}")
+        st.write(f"**Maximum Absences by Any Student:** {max_absences}")
+
+        # "High-risk" threshold
+        absence_threshold = 3
+        high_risk_students = pivot_df[pivot_df["Total Absences"] > absence_threshold].index.tolist()
+        if high_risk_students:
+            st.warning(f"**Alert**: The following students exceeded {absence_threshold} absences:")
+            for s in high_risk_students:
+                st.write(f"- {s} (Total Absences = {pivot_df.loc[s, 'Total Absences']})")
+        else:
+            st.success(f"No students have more than {absence_threshold} absences. Great job!")
+
+        # Quick bar chart
+        # abs_data = pivot_df["Total Absences"].reset_index()
+        # abs_data.columns = ["name", "total_absences"]
+        # fig_bar_absences = px.bar(
+        #     abs_data,
+        #     x="name",
+        #     y="total_absences",
+        #     title="Total Absences by Student"
+        # )
+        # st.plotly_chart(fig_bar_absences, use_container_width=True)
+
+    if st.session_state["pivot_df"] is not None:
+        st.write("### Pivot Preview (Enhanced)")
+        # highlight rows above threshold
+        pivot_styled = st.session_state["pivot_df"].style.apply(
+            highlight_high_absences, axis=1
         )
+        st.dataframe(pivot_styled, use_container_width=True)
+
+        if st.button("Create Downloadable XLSX"):
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                st.session_state["pivot_df"].to_excel(writer, sheet_name="Attendance Pivot")
+
+                workbook = writer.book
+                worksheet = writer.sheets["Attendance Pivot"]
+                red_format = workbook.add_format({"font_color": "red"})
+                row_count, col_count = st.session_state["pivot_df"].shape
+                worksheet.conditional_format(
+                    1, 1, row_count, col_count,
+                    {
+                        "type": "text",
+                        "criteria": "containing",
+                        "value": "Missed",
+                        "format": red_format
+                    }
+                )
+
+            excel_data = output.getvalue()
+            st.download_button(
+                label="Download Program XLSX",
+                data=excel_data,
+                file_name="program_attendance.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    
 #####################
 # PAGE: Manage Schedules
 #####################
@@ -1736,24 +1718,25 @@ def page_generate_reports():
 def page_manage_schedules():
     """
     Page for an instructor (or admin) to create, view, edit, and delete schedules.
-    Stores numeric program_id in Mongo, but *displays* times in 12-hour AM/PM.
-    Adds signature fields like:
-      - created_by_username, created_at
-      - updated_by_username, updated_at
+    Now includes logic so that instructors can only edit/delete schedules
+    they themselves created, unless they are admins.
     """
 
+    # 1) Check login
     instructor_id = st.session_state.get("instructor_id", None)
     is_admin = st.session_state.get("is_admin", False)
     if not instructor_id and not is_admin:
         st.error("You must be logged in as an instructor or admin to manage schedules.")
         return
 
+    # 2) Build a program map from Postgres
     all_programs = list_programs()
     prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
 
-    # 1) Determine which program IDs the user can manage
+    # 3) Determine which program IDs this user can manage
     if is_admin:
-        program_id_options = list(prog_map.keys())  # admin sees all
+        # Admin sees schedules for all existing programs
+        program_id_options = list(prog_map.keys())
     else:
         program_id_options = st.session_state.get("instructor_program_ids", [])
         if not program_id_options:
@@ -1762,10 +1745,11 @@ def page_manage_schedules():
 
     st.header("Manage Class Schedules")
 
-    ##################################################
+    # ------------------------------------------------------------------------------
     # A) Create a New Schedule
-    ##################################################
+    # ------------------------------------------------------------------------------
     with st.expander("Create a New Schedule", expanded=True):
+        # Ensure we can pick a program to attach this schedule to
         if program_id_options:
             selected_prog_id = st.selectbox(
                 "Select Program",
@@ -1777,7 +1761,7 @@ def page_manage_schedules():
             st.warning("No assigned programs available.")
             return
 
-        # Provide unique keys for each widget
+        # Basic schedule fields
         title = st.text_input("Class Title", "", key="new_schedule_title")
         notes = st.text_area("Additional Notes/Description", key="new_schedule_notes")
 
@@ -1793,8 +1777,10 @@ def page_manage_schedules():
         start_dt = None
         end_dt = None
 
+        # ------------------------------------------------------------------------
+        # If "None": single date/time. Else: multiple days in a repeating pattern
+        # ------------------------------------------------------------------------
         if recurrence == "None":
-            # One-time
             chosen_date = st.date_input("Class Date", value=date.today(), key="new_schedule_date")
 
             col_start, col_end = st.columns(2)
@@ -1807,6 +1793,7 @@ def page_manage_schedules():
                 st.write(f"Ends at: **{end_t.strftime('%I:%M %p').lstrip('0')}**")
 
             location = st.text_input("Location (Zoom or Physical Room)", key="new_schedule_location")
+
         else:
             # Weekly or Monthly
             st.write("Select multiple days, each with its own time and location.")
@@ -1834,7 +1821,7 @@ def page_manage_schedules():
                 col2.write(f"Ends at: **{end_for_day.strftime('%I:%M %p').lstrip('0')}**")
 
                 loc_for_day = st.text_input(
-                    f"{d} Location",
+                    f"{d}_loc",
                     "",
                     key=f"{d}_loc"
                 )
@@ -1846,9 +1833,10 @@ def page_manage_schedules():
                     "location": loc_for_day
                 })
 
+        # ------------------------------------------------------------------------
         # "Create Schedule" button
+        # ------------------------------------------------------------------------
         if st.button("Create Schedule", key="btn_create_schedule"):
-            # Build doc for insertion
             if recurrence == "None":
                 start_dt = datetime.combine(chosen_date, start_t)
                 end_dt = datetime.combine(chosen_date, end_t)
@@ -1862,8 +1850,6 @@ def page_manage_schedules():
                     "end_datetime": end_dt,
                     "days_times": [],
                     "location": location,
-
-                    # Signature fields for creation
                     "created_by_username": st.session_state.get("instructor_username", "Admin"),
                     "created_at": datetime.utcnow()
                 }
@@ -1877,8 +1863,6 @@ def page_manage_schedules():
                     "days_times": days_times,
                     "start_datetime": None,
                     "end_datetime": None,
-
-                    # Signature fields for creation
                     "created_by_username": st.session_state.get("instructor_username", "Admin"),
                     "created_at": datetime.utcnow()
                 }
@@ -1886,29 +1870,26 @@ def page_manage_schedules():
             new_id = create_schedule(doc)
             st.success(f"Created schedule with ID: {new_id}")
 
-            # Notify
+            # Optionally send email notifications
             notify_schedule_change(selected_prog_id, doc, event_type="created")
             st.rerun()
 
-    ##################################################
+    # ------------------------------------------------------------------------------
     # B) Show Existing Schedules
-    ##################################################
+    # ------------------------------------------------------------------------------
     st.subheader("Existing Schedules")
 
-    # If admin wants to see all schedules, they'd omit instructor_id from the query
-    all_schedules = list_schedules(instructor_id=instructor_id)
-    if not all_schedules:
-        st.info("No schedules found.")
+    # Instead of filtering by instructor_id, we retrieve schedules by the user’s permitted programs
+    schedules_for_programs = list_schedules_by_program(program_id_options)
+    # If you also want admin to see everything, note that admin’s program_id_options = all
+
+    if not schedules_for_programs:
+        st.info("No schedules found for your assigned programs.")
         return
 
-    # Filter schedules to only programs the user can manage
-    filtered = [sch for sch in all_schedules if sch.get("program_id") in program_id_options]
-    if not filtered:
-        st.info("No schedules for your assigned programs.")
-        return
-
-    for sch in filtered:
-        sid = sch["_id"]  # from Mongo
+    # Render each schedule
+    for sch in schedules_for_programs:
+        sid = sch["_id"]
         pid = sch.get("program_id", None)
         prog_name = prog_map.get(pid, f"Unknown (ID={pid})")
 
@@ -1917,7 +1898,6 @@ def page_manage_schedules():
         st.write(f"**Recurrence**: {sch.get('recurrence', 'None')}")
         st.write(f"**Notes**: {sch.get('notes', '')}")
 
-        # Show who created / updated & when
         created_by = sch.get("created_by_username", "N/A")
         created_at = sch.get("created_at", "N/A")
         updated_by = sch.get("updated_by_username", "N/A")
@@ -1926,14 +1906,16 @@ def page_manage_schedules():
         st.write(f"**Created by**: {created_by} at {created_at}")
         st.write(f"**Last Updated by**: {updated_by} at {updated_at}")
 
-        # If one-time, show start/end
+        # If "None" = single session
         if sch.get("recurrence") == "None":
             start_text = _format_time_12h(sch.get("start_datetime"))
             end_text = _format_time_12h(sch.get("end_datetime"))
             st.write(f"**Date/Time**: {start_text} → {end_text}")
             if sch.get("location"):
                 st.write(f"**Location**: {sch['location']}")
+
         else:
+            # Weekly or Monthly sessions
             dt_list = sch.get("days_times", [])
             if dt_list:
                 st.write("**Days/Times**:")
@@ -1946,26 +1928,35 @@ def page_manage_schedules():
                     loc = d_obj.get("location", "")
                     st.write(f"- {day}: {s_12} → {e_12}, Loc: {loc}")
 
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button(f"Edit {sid}", key=f"edit_btn_{sid}"):
-                st.session_state["editing_schedule"] = sid
-                st.rerun()
-        with col2:
-            if st.button(f"Delete {sid}", key=f"delete_btn_{sid}"):
-                if delete_schedule(sid):
-                    st.success("Schedule deleted.")
-                    st.rerun()
-                else:
-                    st.error("Delete failed or no such schedule.")
+        # ------------------------------------------------------------------
+        # Only show EDIT/DELETE if is_admin or schedule’s instructor = current user
+        # ------------------------------------------------------------------
+        schedule_creator = sch.get("instructor_id")
+        user_can_edit = is_admin or (schedule_creator == instructor_id)
 
-        ##################################################
-        # C) Edit Form
-        ##################################################
+        if user_can_edit:
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(f"Edit {sid}", key=f"edit_btn_{sid}"):
+                    st.session_state["editing_schedule"] = sid
+                    st.rerun()
+            with col2:
+                if st.button(f"Delete {sid}", key=f"delete_btn_{sid}"):
+                    if delete_schedule(sid):
+                        st.success("Schedule deleted.")
+                        st.rerun()
+                    else:
+                        st.error("Delete failed or no such schedule.")
+        else:
+            st.info("You can view this schedule but cannot edit or delete it.")
+        
+        # ------------------------------------------------------------------------------
+        # C) Edit Form (only if user_can_edit)
+        # ------------------------------------------------------------------------------
         editing_id = st.session_state.get("editing_schedule")
-        if editing_id == sid:
+        if user_can_edit and editing_id == sid:
             st.subheader(f"Editing Schedule: {editing_id}")
-            schedule_doc = next((x for x in filtered if x["_id"] == editing_id), None)
+            schedule_doc = next((x for x in schedules_for_programs if x["_id"] == editing_id), None)
             if not schedule_doc:
                 st.error("Schedule not found or not authorized.")
                 return
@@ -1996,6 +1987,7 @@ def page_manage_schedules():
                 key=f"edit_notes_{sid}"
             )
 
+            from dateutil import parser
             if new_recurrence == "None":
                 existing_start = schedule_doc.get("start_datetime")
                 existing_end = schedule_doc.get("end_datetime")
@@ -2054,7 +2046,6 @@ def page_manage_schedules():
                     default_loc = ""
 
                     if existing:
-                        # parse existing strings e.g. "09:00:00"
                         if "start_time" in existing:
                             try:
                                 hh, mm, ss = existing["start_time"].split(":")
@@ -2106,7 +2097,9 @@ def page_manage_schedules():
                 updates = {
                     "title": new_title,
                     "recurrence": new_recurrence,
-                    "notes": new_notes
+                    "notes": new_notes,
+                    "updated_by_username": st.session_state.get("username", "Unknown"),
+                    "updated_at": datetime.utcnow()
                 }
 
                 if new_recurrence == "None":
@@ -2121,10 +2114,6 @@ def page_manage_schedules():
                     updates["start_datetime"] = None
                     updates["end_datetime"] = None
                     updates.pop("location", None)
-
-                # NEW: signature for update
-                updates["updated_by_username"] = st.session_state.get("username", "Unknown")
-                updates["updated_at"] = datetime.utcnow()
 
                 success = update_schedule(editing_id, updates)
                 if success:

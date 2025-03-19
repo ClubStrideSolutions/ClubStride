@@ -108,6 +108,16 @@ def list_schedules(instructor_id: Optional[str] = None) -> List[dict]:
         d["_id"] = str(d["_id"])
     return docs
 
+def list_schedules_by_program(program_ids: List[int]) -> List[dict]:
+    db = connect_to_db()
+    coll = db["Schedules"]
+
+    # If the user has multiple programs, we want any schedule doc with program_id in that list
+    query = {
+        "program_id": {"$in": program_ids}
+    }
+    return list(coll.find(query))
+
 def update_schedule(schedule_id: str, updates: dict) -> bool:
     """
     Update the schedule with the given _id using the keys in `updates`.

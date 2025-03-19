@@ -12,3 +12,4 @@ pandas
 python-dateutil
 mailersend
 plotly
+xlsxwriter
