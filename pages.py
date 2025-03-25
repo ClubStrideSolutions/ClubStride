@@ -954,7 +954,7 @@ def page_help():
     <p style="color: #4a5568; font-style: italic; margin-bottom: 0;">Club Stride Attendance System • Version 1.0</p>
     </div>
     """, unsafe_allow_html=True)
-    
+
 # def page_help():
 #     """
 #     A comprehensive "Help / User Guide" page that explains how to use the 
@@ -2349,7 +2349,9 @@ def page_manage_students():
                     selected_prog_id = st.selectbox(
                         "Select Program for CSV Rows:",
                         options=prog_map.keys(),
-                        format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})"
+                        format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})",
+                        key="csv_upload_program_selector_admin"  # Add this unique key
+
                     )
                 else:
                     perm_ids = st.session_state.get("instructor_program_ids", [])
@@ -2359,7 +2361,9 @@ def page_manage_students():
                     selected_prog_id = st.selectbox(
                         "Select Program for CSV Rows:",
                         options=perm_ids,
-                        format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}"
+                        format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}",
+                        key="csv_upload_program_selector"  # Add this unique key
+
                     )
                 
                 # Step 2: Upload File
@@ -2502,7 +2506,9 @@ def page_take_attendance():
             "Select Program:",
             options=[pc[0] for pc in program_choices],
             format_func=lambda pid: "All Programs" if pid is None else f"{prog_map[pid]} (ID: {pid})",
-            help="Choose which program's students to display"
+            help="Choose which program's students to display",
+            key="take_attendance_program_selector"  # Add this unique key
+
         )
 
         if selected_prog_id is None:
