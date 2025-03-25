@@ -1809,7 +1809,15 @@ def page_manage_students():
     # Initialize edit state if not already done
     if "editing_student_id" not in st.session_state:
         st.session_state["editing_student_id"] = None
-    
+
+    # We’ll also store a deletion candidate in session state for the two-step flow
+    if "delete_candidate_id" not in st.session_state:
+        st.session_state["delete_candidate_id"] = None
+    if "delete_candidate_name" not in st.session_state:
+        st.session_state["delete_candidate_name"] = None
+    if "delete_candidate_prog" not in st.session_state:
+        st.session_state["delete_candidate_prog"] = None
+
     # 1) Must be logged in (admin or instructor)
     if not st.session_state.get("instructor_logged_in", False) and not st.session_state.get("is_admin", False):
         st.error("🔒 You must be logged in to access this page.")
@@ -1819,7 +1827,7 @@ def page_manage_students():
     col_left, col_center, col_right = st.columns([1, 5, 1])
     with col_center:
         st.header("👨‍🎓 Manage Students")
-        
+
         is_admin = st.session_state.get("is_admin", False)
         user_role = "Administrator" if is_admin else "Instructor"
         st.write(f"*Logged in as: {user_role}*")
@@ -1828,17 +1836,17 @@ def page_manage_students():
         # A) Program Filter for Admin with improved UI
         # ----------------------------------------------------------
         st.markdown("### 🔍 Filter Students")
-        
+
         # Get all programs for reference
         all_programs = list_programs()  # from instructors_db
         prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
-        
+
         if is_admin:
             # Build a list of (program_id, "program_name") pairs
             program_choices = [(None, "All Programs")] + [
                 (p["program_id"], p["program_name"]) for p in all_programs
             ]
-            
+
             with st.container():
                 selected_prog_id = st.selectbox(
                     "Select Program to View:",
@@ -1850,7 +1858,7 @@ def page_manage_students():
             if selected_prog_id is None:
                 # Admin sees all students
                 students = get_all_students()
-                st.success(f"Showing all students from all programs")
+                st.success("Showing all students from all programs")
             else:
                 # Admin sees only students in the chosen program
                 students = get_all_students(program_ids=[selected_prog_id])
@@ -1862,20 +1870,20 @@ def page_manage_students():
             if not permitted_ids:
                 st.warning("⚠️ You have no assigned programs. Contact an admin for access.")
                 return
-                
+
             # Show a filter for instructors with multiple programs
             if len(permitted_ids) > 1:
                 program_choices = [(None, "All My Programs")] + [
                     (pid, prog_map.get(pid, f"Program ID: {pid}")) for pid in permitted_ids
                 ]
-                
+
                 selected_prog_id = st.selectbox(
                     "Filter by Program:",
                     options=[pc[0] for pc in program_choices],
                     format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}",
                     help="Select a specific program or view all your assigned programs"
                 )
-                
+
                 if selected_prog_id is None:
                     # Instructor sees all their permitted programs
                     students = get_all_students(program_ids=permitted_ids)
@@ -1907,7 +1915,7 @@ def page_manage_students():
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         with tabs[0]:
             st.subheader("Current Students")
-            
+
             # Help expander
             with st.expander("ℹ️ How to manage students", expanded=False):
                 st.markdown("""
@@ -1917,17 +1925,19 @@ def page_manage_students():
                 - **Edit:** Update a student's information directly within the student card
                 - **Mark Attendance:** Record attendance for today
                 - **Mark Past Attendance:** Record attendance for a previous date
-                
+
                 All changes are saved immediately to the database.
                 """)
 
             if students:
                 st.write(f"Total students: {len(students)}")
-                
+
                 # Add a search box for filtering students by name
-                search_term = st.text_input("🔍 Search students by name:", 
-                                           help="Type a name to filter the list of students")
-                
+                search_term = st.text_input(
+                    "🔍 Search students by name:",
+                    help="Type a name to filter the list of students"
+                )
+
                 # Filter students by search term if provided
                 if search_term:
                     filtered_students = [s for s in students if search_term.lower() in s.get("name", "").lower()]
@@ -1936,12 +1946,10 @@ def page_manage_students():
                     students_to_display = filtered_students
                 else:
                     students_to_display = students
-                
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                # INDIVIDUAL ATTENDANCE LOGIC - Outside the student loop
-                # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+                # Placeholder for attendance forms outside the loop
                 attendance_placeholder = st.empty()
-                
+
                 for i, s in enumerate(students_to_display):
                     student_id = s.get("student_id")
                     name = s.get("name", "")
@@ -1950,23 +1958,20 @@ def page_manage_students():
                     prog_id = s.get("program_id", None)
                     grade = s.get("grade", "")
                     school = s.get("school", "")
-                    
+
                     # Get program name for display
                     program_name = prog_map.get(prog_id, f"Program ID: {prog_id}")
-                    
-                    # Check if this student is currently being edited
-                    is_editing = st.session_state["editing_student_id"] == student_id
 
-                    # Create a card-like container for each student
+                    # Check if this student is currently being edited
+                    is_editing = (st.session_state["editing_student_id"] == student_id)
+
+                    # Create a container/expander for each student
                     with st.container():
-                        # Use an expander for each student to save space
-                        # Automatically expand if this student is being edited
                         with st.expander(f"**{name}** - {program_name}", expanded=is_editing):
                             if not is_editing:
-                                # Normal view mode
-                                # Create two columns - one for info, one for actions
+                                # Normal view mode: info + actions
                                 col_info, col_actions = st.columns([3, 1])
-                                
+
                                 with col_info:
                                     st.markdown(f"**Student ID:** {student_id}")
                                     st.markdown(f"**Program:** {program_name}")
@@ -1974,64 +1979,82 @@ def page_manage_students():
                                     st.markdown(f"**School:** {school}")
                                     st.markdown(f"**Contact:** {contact_email}")
                                     st.markdown(f"**Phone:** {phone}")
-                                
+
                                 with col_actions:
-                                    # Group the buttons into a more organized layout
-                                    st.write("**Actions:**")
-                                    
-                                    # Edit Button
-                                    if st.button("✏️ Edit", key=f"btn_edit_{student_id}", 
-                                                help=f"Edit information for {name}"):
+                                    # EDIT button
+                                    if st.button("✏️ Edit", key=f"btn_edit_{student_id}",
+                                                 help=f"Edit information for {name}"):
                                         st.session_state["editing_student_id"] = student_id
                                         st.session_state["edit_data"] = s
                                         st.rerun()
-                                    
-                                    # Attendance Buttons
-                                    if st.button("✅ Mark Today", key=f"btn_attendance_{student_id}", 
-                                               help=f"Record today's attendance for {name}"):
+
+                                    # ATTENDANCE buttons
+                                    if st.button("✅ Mark Today", key=f"btn_attendance_{student_id}",
+                                                 help=f"Record today's attendance for {name}"):
                                         st.session_state["attendance_student"] = s
                                         st.rerun()
-                                    
-                                    if st.button("📆 Mark Past", key=f"btn_attendance_past_{student_id}", 
-                                               help=f"Record past attendance for {name}"):
+
+                                    if st.button("📆 Mark Past", key=f"btn_attendance_past_{student_id}",
+                                                 help=f"Record past attendance for {name}"):
                                         st.session_state["attendance_student"] = s
                                         st.session_state["attendance_mode"] = "past"
                                         st.rerun()
-                                    
-                                    # Delete Button - with a different color to indicate danger
-                                    if st.button("🗑️ Delete", key=f"btn_delete_{student_id}", 
-                                               help=f"Permanently delete {name} from the database"):
-                                        # Add a confirmation step to prevent accidental deletions
-                                        st.warning(f"Are you sure you want to delete {name}?")
-                                        col_cancel, col_confirm = st.columns(2)
-                                        
-                                        with col_cancel:
-                                            if st.button("Cancel", key=f"cancel_delete_{student_id}"):
-                                                st.rerun()
-                                                
-                                        with col_confirm:
-                                            if st.button("Confirm Delete", key=f"confirm_delete_{student_id}"):
-                                                # Instructors must only delete if the student's program_id is in permitted_ids
-                                                if not is_admin:
-                                                    perm_ids = st.session_state.get("instructor_program_ids", [])
-                                                    if prog_id not in perm_ids:
-                                                        st.error("⛔ You are not permitted to delete students in this program.")
-                                                        st.stop()
 
-                                                with st.spinner(f"Deleting {name}..."):
-                                                    success = delete_student_record(student_id)
-                                                    if success:
-                                                        st.success(f"✅ Deleted student {name} (ID={student_id}).")
-                                                        st.rerun()
-                                                    else:
-                                                        st.error("❌ Delete failed or no such student.")
+                                    # -----------------------------
+                                    # DELETE: Two-step confirmation
+                                    # -----------------------------
+                                    delete_candidate_id = st.session_state.get("delete_candidate_id")
+                                    delete_candidate_name = st.session_state.get("delete_candidate_name")
+                                    delete_candidate_prog = st.session_state.get("delete_candidate_prog")
+
+                                    if delete_candidate_id == student_id:
+                                        # We've already clicked Delete on this student in a previous run
+                                        st.warning(f"Are you sure you want to delete {delete_candidate_name}?")
+
+                                        # No columns here - just two separate buttons
+                                        cancel_delete = st.button("Cancel Delete", key=f"cancel_delete_{student_id}")
+                                        confirm_delete = st.button("Confirm Delete", key=f"confirm_delete_{student_id}")
+
+                                        if cancel_delete:
+                                            st.session_state["delete_candidate_id"] = None
+                                            st.session_state["delete_candidate_name"] = None
+                                            st.session_state["delete_candidate_prog"] = None
+                                            st.rerun()
+
+                                        if confirm_delete:
+                                            # Check instructor permissions
+                                            if not is_admin:
+                                                perm_ids = st.session_state.get("instructor_program_ids", [])
+                                                if delete_candidate_prog not in perm_ids:
+                                                    st.error("⛔ You are not permitted to delete students in this program.")
+                                                    st.stop()
+
+                                            with st.spinner(f"Deleting {delete_candidate_name}..."):
+                                                success = delete_student_record(delete_candidate_id)
+                                                if success:
+                                                    st.success(f"✅ Deleted student {delete_candidate_name} (ID={delete_candidate_id}).")
+                                                    # Clear the candidate & re-run
+                                                    st.session_state["delete_candidate_id"] = None
+                                                    st.session_state["delete_candidate_name"] = None
+                                                    st.session_state["delete_candidate_prog"] = None
+                                                    st.rerun()
+                                                else:
+                                                    st.error("❌ Delete failed or no such student.")
+                                    else:
+                                        # If we're not already in a delete-confirm step, show the 'Delete' button
+                                        if st.button("🗑️ Delete", key=f"btn_delete_{student_id}",
+                                                     help=f"Permanently delete {name} from the database"):
+                                            # Store this student as the candidate in session state
+                                            st.session_state["delete_candidate_id"] = student_id
+                                            st.session_state["delete_candidate_name"] = name
+                                            st.session_state["delete_candidate_prog"] = prog_id
+                                            st.rerun()
                             else:
-                                # Edit mode within the expander
-                                st.subheader(f"✏️ Edit Student Information")
-                                
-                                # Get the student data from session state
+                                # EDIT MODE
+                                st.subheader("✏️ Edit Student Information")
+
                                 edited_stud = st.session_state["edit_data"]
-                                
+
                                 # Guard against editing a student in a program the instructor doesn't have
                                 if not is_admin:
                                     perm_ids = st.session_state.get("instructor_program_ids", [])
@@ -2040,19 +2063,19 @@ def page_manage_students():
                                         if st.button("OK"):
                                             st.session_state["editing_student_id"] = None
                                             st.rerun()
-                                
+
                                 with st.form(f"edit_student_form_{student_id}"):
                                     col1, col2 = st.columns(2)
-                                    
+
                                     with col1:
                                         new_name = st.text_input("Name *", value=edited_stud.get("name", ""))
                                         new_phone = st.text_input("Phone", value=edited_stud.get("phone", ""))
                                         new_email = st.text_input("Contact Email", value=edited_stud.get("contact_email", ""))
-                                    
+
                                     with col2:
                                         new_grade = st.text_input("Grade", value=edited_stud.get("grade", ""))
                                         new_school = st.text_input("School", value=edited_stud.get("school", ""))
-                                        
+
                                         # If admin, let them pick a new program
                                         if is_admin:
                                             all_progs = list_programs()
@@ -2083,17 +2106,16 @@ def page_manage_students():
                                                 format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}",
                                                 index=perm_ids.index(current_pid) if current_pid in perm_ids else 0
                                             )
-                                    
+
                                     st.markdown("**Required fields are marked with * **")
-                                    
+
                                     col_cancel, col_save = st.columns(2)
-                                    
                                     with col_cancel:
                                         cancel_btn = st.form_submit_button("Cancel")
-                                        
+
                                     with col_save:
                                         submit_btn = st.form_submit_button("Save Changes")
-                                    
+
                                     if submit_btn:
                                         if not new_name.strip():
                                             st.error("❌ Name is required.")
@@ -2102,64 +2124,65 @@ def page_manage_students():
                                                 try:
                                                     msg = update_student_info(
                                                         student_id=edited_stud["student_id"],
-                                                        name=new_name,
-                                                        phone=new_phone,
-                                                        contact_email=new_email,
-                                                        program_id=new_program_id,
-                                                        grade=new_grade,
-                                                        school=new_school
+                                                        new_name=new_name,
+                                                        new_phone=new_phone,
+                                                        new_contact_email=new_email,
+                                                        # If you want to store the updated program:
+                                                        # program_id=new_program_id,
+                                                        new_grade=new_grade,
+                                                        new_school=new_school
                                                     )
                                                     st.success(f"✅ {msg}")
                                                     st.session_state["editing_student_id"] = None
                                                     st.rerun()
                                                 except Exception as e:
                                                     st.error(f"❌ Error updating student: {e}")
-                                    
+
                                     if cancel_btn:
                                         st.session_state["editing_student_id"] = None
                                         st.rerun()
-                        
-                        # Add a visual separator between students
+
+                        # Separator line between each student
                         if i < len(students_to_display) - 1:
                             st.write("---")
 
-                # Handle attendance forms - placed outside the student loop to avoid UI conflicts
+                # Handle attendance forms (outside the loop to avoid UI conflicts)
                 if "attendance_student" in st.session_state:
                     with attendance_placeholder.container():
                         st.write("---")
                         st.subheader("📝 Attendance Recording")
-                        
+
                         single_stud = st.session_state["attendance_student"]
                         mode = st.session_state.get("attendance_mode", "today")
-                        
+
                         if mode == "today":
                             with st.form("today_attendance_form"):
                                 st.write(f"**Recording attendance for: {single_stud['name']}**")
                                 current_dt = datetime.now()
                                 st.write(f"Date: {current_dt.strftime('%Y-%m-%d')}")
                                 st.write(f"Time: {current_dt.strftime('%H:%M')}")
-                                
+
                                 status_opt = ["Present", "Late", "Absent", "Excused"]
                                 status_icons = ["✅", "🕒", "❌", "🔖"]
                                 status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opt)]
-                                
+
                                 selected_status_idx = st.selectbox(
-                                    "Status:", 
+                                    "Status:",
                                     options=range(len(status_opt)),
                                     format_func=lambda i: status_options_with_icons[i],
                                     index=0
                                 )
                                 chosen_status = status_opt[selected_status_idx]
-                                
+
                                 comment_txt = st.text_area("Comment (Optional)", height=100)
-                                
+
                                 col1, col2 = st.columns(2)
                                 with col1:
                                     cancel_btn = st.form_submit_button("Cancel")
-                                    
+
                                 with col2:
                                     submit_btn = st.form_submit_button("Submit Attendance")
-                                
+
                                 if submit_btn:
                                     with st.spinner("Recording attendance..."):
                                         try:
@@ -2174,45 +2197,45 @@ def page_manage_students():
                                         except Exception as e:
                                             st.error(f"❌ Error: {e}")
 
-                                        st.session_state.pop("attendance_student")
+                                        st.session_state.pop("attendance_student", None)
                                         st.session_state.pop("attendance_mode", None)
                                         st.rerun()
-                                        
+
                                 if cancel_btn:
-                                    st.session_state.pop("attendance_student")
+                                    st.session_state.pop("attendance_student", None)
                                     st.session_state.pop("attendance_mode", None)
                                     st.info("ℹ️ Individual attendance marking canceled.")
                                     st.rerun()
 
                         elif mode == "past":
-                            with st.form("past_attendance_form"):
+                            with st.form("past_attendance_form_students"):
                                 st.write(f"**Recording past attendance for: {single_stud['name']}**")
-                                
+
                                 date_val = st.date_input("Session Date", value=date.today())
                                 time_val = st.time_input("Session Time", value=time(9, 0))
                                 combined_dt = datetime.combine(date_val, time_val)
-                                
+
                                 status_opt = ["Present", "Late", "Absent", "Excused"]
                                 status_icons = ["✅", "🕒", "❌", "🔖"]
                                 status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opt)]
-                                
+
                                 selected_status_idx = st.selectbox(
-                                    "Status:", 
+                                    "Status:",
                                     options=range(len(status_opt)),
                                     format_func=lambda i: status_options_with_icons[i],
                                     index=0
                                 )
                                 chosen_status = status_opt[selected_status_idx]
-                                
+
                                 comment_txt = st.text_area("Comment (Optional)", height=100)
-                                
+
                                 col1, col2 = st.columns(2)
                                 with col1:
                                     cancel_btn = st.form_submit_button("Cancel")
-                                    
+
                                 with col2:
                                     submit_btn = st.form_submit_button("Submit Past Attendance")
-                                
+
                                 if submit_btn:
                                     with st.spinner("Recording past attendance..."):
                                         try:
@@ -2223,16 +2246,19 @@ def page_manage_students():
                                                 comment=comment_txt,
                                                 attendance_date=combined_dt
                                             )
-                                            st.success(f"✅ Marked {single_stud['name']} as {chosen_status} on {combined_dt.strftime('%Y-%m-%d %H:%M')}. {msg}")
+                                            st.success(
+                                                f"✅ Marked {single_stud['name']} as {chosen_status} on "
+                                                f"{combined_dt.strftime('%Y-%m-%d %H:%M')}. {msg}"
+                                            )
                                         except Exception as e:
                                             st.error(f"❌ Error: {e}")
 
-                                        st.session_state.pop("attendance_student")
+                                        st.session_state.pop("attendance_student", None)
                                         st.session_state.pop("attendance_mode", None)
                                         st.rerun()
-                                        
+
                                 if cancel_btn:
-                                    st.session_state.pop("attendance_student")
+                                    st.session_state.pop("attendance_student", None)
                                     st.session_state.pop("attendance_mode", None)
                                     st.info("ℹ️ Past attendance marking canceled.")
                                     st.rerun()
@@ -2243,14 +2269,14 @@ def page_manage_students():
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         with tabs[1]:
             st.subheader("Add or Update Students")
-            
+
             # Help expander
             with st.expander("ℹ️ How to add students", expanded=False):
                 st.markdown("""
                 ### Adding Students:
                 - **Single Student Entry:** Add one student at a time with complete details
                 - **Bulk CSV Upload:** Upload multiple students at once using a CSV file
-                
+
                 #### CSV Format Requirements:
                 Your CSV file should include these columns:
                 - First Name
@@ -2259,11 +2285,10 @@ def page_manage_students():
                 - Email
                 - Grade
                 - School
-                
+
                 The program ID will be applied to all students in the CSV.
                 """)
 
-            # We keep your radio approach to switch Single / Bulk
             action = st.radio(
                 "Choose method:",
                 ["Single Student Entry", "Bulk CSV Upload"],
@@ -2273,19 +2298,19 @@ def page_manage_students():
 
             if action == "Single Student Entry":
                 st.write("### Add a New Student")
-                
+
                 with st.form("student_form"):
                     col1, col2 = st.columns(2)
-                    
+
                     with col1:
                         name_val = st.text_input("Name *", "", help="Student's full name")
                         phone_val = st.text_input("Phone", "", help="Contact phone number")
                         contact_val = st.text_input("Contact Email", "", help="Email address for the student or parent")
-                    
+
                     with col2:
                         grade_val = st.text_input("Grade", "", help="Student's current grade level")
                         school_val = st.text_input("School", "", help="Student's school name")
-                        
+
                         # Program selection based on user role
                         if is_admin:
                             all_progs = list_programs()
@@ -2311,9 +2336,9 @@ def page_manage_students():
                                     options=perm_ids,
                                     format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}"
                                 )
-                    
+
                     st.markdown("**Required fields are marked with * **")
-                    
+
                     submitted = st.form_submit_button("Save Student")
                     if submitted:
                         if not name_val.strip():
@@ -2327,18 +2352,17 @@ def page_manage_students():
                                     grade=grade_val, school=school_val
                                 )
                                 st.success(f"✅ {result}")
-                                # Show a button to add another student
-                                if st.button("Add Another Student"):
+                                if result != '':
                                     st.rerun()
 
             else:
                 # Bulk CSV Upload
                 st.write("### Bulk Upload Students")
-                
+
                 # Step 1: Select Program
                 st.markdown("#### 1️⃣ Select Program")
                 st.write("All students in the CSV will be assigned to this program:")
-                
+
                 if is_admin:
                     all_progs = list_programs()
                     if not all_progs:
@@ -2350,8 +2374,7 @@ def page_manage_students():
                         "Select Program for CSV Rows:",
                         options=prog_map.keys(),
                         format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})",
-                        key="csv_upload_program_selector_admin"  # Add this unique key
-
+                        key="csv_upload_program_selector_admin"
                     )
                 else:
                     perm_ids = st.session_state.get("instructor_program_ids", [])
@@ -2362,15 +2385,13 @@ def page_manage_students():
                         "Select Program for CSV Rows:",
                         options=perm_ids,
                         format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}",
-                        key="csv_upload_program_selector"  # Add this unique key
-
+                        key="csv_upload_program_selector"
                     )
-                
+
                 # Step 2: Upload File
                 st.markdown("#### 2️⃣ Upload CSV File")
                 st.write("Upload a CSV file with student information:")
-                
-                # Sample template
+
                 st.markdown("""
                 Need a template? Here's a sample CSV format:
                 ```
@@ -2379,37 +2400,35 @@ def page_manage_students():
                 Jane,Smith,555-987-6543,jane.smith@email.com,11,Washington High
                 ```
                 """)
-                
+
                 uploaded_file = st.file_uploader("Select a CSV file", type=["csv"])
-                
+
                 if uploaded_file:
                     # Step 3: Preview and Process
                     st.markdown("#### 3️⃣ Preview and Process")
-                    
+
                     with st.spinner("Reading CSV data..."):
                         df = pd.read_csv(uploaded_file)
-                        
+
                     # Preview in a clean format
                     st.write("Preview of first 5 rows:")
                     st.dataframe(df.head(), use_container_width=True)
-                    
+
                     # Check for required columns
                     required_cols = {"First Name", "Last Name", "Number", "Email", "Grade", "School"}
                     missing_cols = required_cols - set(df.columns)
-                    
+
                     if missing_cols:
                         st.error(f"❌ CSV is missing required columns: {', '.join(missing_cols)}")
                         st.info(f"Required columns are: {', '.join(required_cols)}")
                     else:
                         total_rows = len(df)
                         st.write(f"Total records to process: {total_rows}")
-                        
-                        # Process button with progress indication
+
                         if st.button("🔄 Process CSV Data"):
-                            # Progress bar
                             progress_bar = st.progress(0)
                             status_text = st.empty()
-                            
+
                             successes = 0
                             failures = 0
                             messages = []
@@ -2419,7 +2438,7 @@ def page_manage_students():
                                 progress = int((idx + 1) / total_rows * 100)
                                 progress_bar.progress(progress)
                                 status_text.text(f"Processing row {idx+1} of {total_rows}...")
-                                
+
                                 try:
                                     first_name = str(row["First Name"]).strip()
                                     last_name = str(row["Last Name"]).strip()
@@ -2434,7 +2453,8 @@ def page_manage_students():
                                     if not is_admin:
                                         perm_ids = st.session_state.get("instructor_program_ids", [])
                                         if selected_prog_id not in perm_ids:
-                                            message = f"Row {idx+1}: Program ID '{selected_prog_id}' is not in your assigned list."
+                                            message = (f"Row {idx+1}: Program ID '{selected_prog_id}' "
+                                                       "is not in your assigned list.")
                                             messages.append(message)
                                             failures += 1
                                             continue
@@ -2443,25 +2463,25 @@ def page_manage_students():
                                         name_val, phone_val, contact_val,
                                         selected_prog_id, grade_val, school_val
                                     )
-                                    
+
                                     if ("New student record" in result_msg) or ("updated" in result_msg):
                                         successes += 1
                                         messages.append(f"Row {idx+1}: {result_msg}")
                                     else:
                                         failures += 1
                                         messages.append(f"Row {idx+1}: Failed - {result_msg}")
-                                        
+
                                 except Exception as e:
                                     failures += 1
                                     messages.append(f"Row {idx+1}: Error - {str(e)}")
-                            
+
                             # Final update
                             progress_bar.progress(100)
                             status_text.text("Processing complete!")
-                            
+
                             # Summary
                             st.success(f"✅ Bulk upload complete. Successes: {successes}, Failures: {failures}")
-                            
+
                             # Show detailed messages in an expander
                             if messages:
                                 with st.expander("View Processing Details", expanded=(failures > 0)):
@@ -2470,7 +2490,7 @@ def page_manage_students():
                                             st.error(msg)
                                         else:
                                             st.success(msg)
-                            
+
                             # Offer to refresh the page
                             if st.button("View Updated Student List"):
                                 st.rerun()
@@ -2788,7 +2808,7 @@ def page_take_attendance():
             st.info("All students marked Excused - you can adjust individual statuses below")
 
         # Build a form to finalize each student's status
-        with st.form("past_attendance_form"):
+        with st.form("past_attendance_form_attendance"):
             past_data = {}
             
             # Group students by program for better organization
@@ -2920,6 +2940,7 @@ def page_take_attendance():
 # PAGE: Review Attendance
 #####################
 
+
 def page_review_attendance():
     st.header("📊 Review Attendance Logs")
     
@@ -2930,7 +2951,7 @@ def page_review_attendance():
         - **Attendance Records**: View, edit, or delete individual attendance records
         - **Missed Counts**: See a summary of absent/missed sessions by student
         - Use the filters to narrow down records by program or student name
-        
+
         You can edit any record by clicking the Edit button in its panel.
         """)
 
@@ -2961,35 +2982,35 @@ def page_review_attendance():
 
     total_students = len(all_students)
 
-    # Get last week's student count from ObjectId logic
+    # Get last week's student count from your custom logic
     last_week_count = get_student_count_as_of_last_week()
     student_delta = total_students - last_week_count
 
-    # Absent comparison
+    # Compare absences this vs. last week
     absent_this_week = sum(1 for r in subdocs_this_week if r["attendance"]["status"] == "Absent")
     absent_last_week = sum(1 for r in subdocs_last_week if r["attendance"]["status"] == "Absent")
     delta_absent = absent_this_week - absent_last_week
 
     # -------------------------------------------------------------
-    # B) Display the top-level metrics using st.metric and columns
+    # B) Display top-level metrics
     # -------------------------------------------------------------
     st.markdown("### Summary Metrics")
-    col1, col2, col3 = st.columns(3)
-    with col1:
+    c1, c2, c3 = st.columns(3)
+    with c1:
         st.metric(
             label="Attendance Records This Week",
             value=total_this_week,
             delta=f"{attendance_delta}" if attendance_delta != 0 else None,
             delta_color="normal" if attendance_delta >= 0 else "inverse"
         )
-    with col2:
+    with c2:
         st.metric(
             label="Absences This Week",
             value=absent_this_week,
             delta=f"{delta_absent}" if delta_absent != 0 else None,
-            delta_color="inverse"  # Fewer absences is good (green), more is bad (red)
+            delta_color="inverse"  # Fewer absences is good (green)
         )
-    with col3:
+    with c3:
         st.metric(
             label="Total Active Students",
             value=total_students,
@@ -3000,32 +3021,33 @@ def page_review_attendance():
     st.write("---")
 
     # -------------------------------------------------------------
-    # C) Missed Counts and All Attendance in tabs
+    # C) Show tabs: [All Attendance], [Missed Sessions]
     # -------------------------------------------------------------
     tab1, tab2 = st.tabs(["📋 All Attendance Records", "🚫 Missed Sessions"])
     
     with tab1:
         st.subheader("Attendance Records")
-        show_attendance_logs()
+        show_attendance_logs()  # Detailed logic below
 
     with tab2:
         st.subheader("Students with Missed Sessions")
-        show_missed_counts()
+        show_missed_counts()    # Provided by your code elsewhere
 
 
 def show_attendance_logs():
-    # Initialize the edit state if not already done
+    # Track which record is in edit mode
     if "edit_record_key" not in st.session_state:
         st.session_state["edit_record_key"] = None
-    
+
+    # Track which record is pending deletion
+    if "delete_candidate" not in st.session_state:
+        st.session_state["delete_candidate"] = None
+
     # ---------------------------------------------------------
-    # 1) Load attendance records from session cache or DB
+    # 1) Load or refresh attendance records from DB
     # ---------------------------------------------------------
     if "attendance_records" not in st.session_state or st.session_state["attendance_records"] is None:
         try:
-            # Each record is like:
-            # {"student_id":..., "name":..., "program_id":..., 
-            #  "attendance":{"date":..., "status":..., "comment":...}}
             with st.spinner("Loading attendance records..."):
                 records = get_all_attendance_subdocs()
                 st.session_state["attendance_records"] = records
@@ -3040,14 +3062,14 @@ def show_attendance_logs():
         return
 
     # ---------------------------------------------------------
-    # 2) Admin or Instructor program filtering
+    # 2) Program-based filtering
     # ---------------------------------------------------------
     st.markdown("### 🔍 Filter Records")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        all_programs = list_programs()  # from instructors_db
+        all_programs = list_programs()
         prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
         is_admin = st.session_state.get("is_admin", False)
 
@@ -3072,19 +3094,16 @@ def show_attendance_logs():
             permitted_ids = st.session_state.get("instructor_program_ids", [])
             logs = [r for r in logs if r.get("program_id") in permitted_ids]
             
-            # If instructor has multiple programs, offer a program filter
+            # If multiple programs, allow a filter
             if len(permitted_ids) > 1:
                 program_choices = [(None, "All My Programs")] + [
                     (pid, prog_map.get(pid, f"Program ID: {pid}")) for pid in permitted_ids
                 ]
-                
                 selected_prog_id = st.selectbox(
                     "Filter by Program:",
                     options=[pc[0] for pc in program_choices],
-                    format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}",
-                    help="Select a program to filter attendance records"
+                    format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}"
                 )
-                
                 if selected_prog_id is not None:
                     logs = [
                         r for r in logs
@@ -3092,7 +3111,7 @@ def show_attendance_logs():
                     ]
 
     # ---------------------------------------------------------
-    # 3) Filter by Student Name
+    # 3) Student Name filter
     # ---------------------------------------------------------
     with col2:
         all_names = sorted({doc.get("name", "Unknown") for doc in logs})
@@ -3107,14 +3126,19 @@ def show_attendance_logs():
     if not logs:
         st.info("📌 No attendance records found for that filter.")
         return
-        
-    # Show total count of records
+
     st.success(f"Showing {len(logs)} attendance records")
 
     # ---------------------------------------------------------
-    # 4) Allow sorting options
+    # 4) Sorting
     # ---------------------------------------------------------
-    sort_options = ["Date (Newest First)", "Date (Oldest First)", "Student Name", "Program", "Status"]
+    sort_options = [
+        "Date (Newest First)",
+        "Date (Oldest First)",
+        "Student Name",
+        "Program",
+        "Status",
+    ]
     sort_choice = st.selectbox(
         "Sort by:",
         options=sort_options,
@@ -3123,153 +3147,158 @@ def show_attendance_logs():
     )
     
     # Apply sorting
+    def get_date_str(record):
+        """Return date as a string for sorting."""
+        att_date = record.get("attendance", {}).get("date", "")
+        # If it's a datetime, convert to iso. If string, just use it
+        if isinstance(att_date, datetime):
+            return att_date.isoformat()
+        else:
+            return str(att_date)
+
     if sort_choice == "Date (Newest First)":
-        logs = sorted(logs, key=lambda x: str(x.get("attendance", {}).get("date", "")), reverse=True)
+        logs = sorted(logs, key=lambda x: get_date_str(x), reverse=True)
     elif sort_choice == "Date (Oldest First)":
-        logs = sorted(logs, key=lambda x: str(x.get("attendance", {}).get("date", "")))
+        logs = sorted(logs, key=lambda x: get_date_str(x))
     elif sort_choice == "Student Name":
         logs = sorted(logs, key=lambda x: x.get("name", ""))
     elif sort_choice == "Program":
         logs = sorted(logs, key=lambda x: prog_map.get(x.get("program_id", 0), ""))
     elif sort_choice == "Status":
         logs = sorted(logs, key=lambda x: x.get("attendance", {}).get("status", ""))
-    
+
     st.write("---")
 
     # ---------------------------------------------------------
-    # 5) Display each record in an expander with color-coded/emoji status
+    # 5) Display each record in an expander
     # ---------------------------------------------------------
-    # We'll map "Present" -> "✅ Present", "Late" -> "🕑 Late", etc.
     emoji_map = {
         "Present": "✅ Present",
         "Late": "🕑 Late",
         "Absent": "🚫 Absent",
         "Excused": "🤝 Excused"
     }
-    
-    # Background colors for statuses
-    status_colors = {
-        "Present": "#d4f7d4",  # light green
-        "Late": "#fff4d4",     # light yellow
-        "Absent": "#ffd4d4",   # light red
-        "Excused": "#e0e0e0"   # light gray
-    }
 
     for idx, doc in enumerate(logs):
         att = doc.get("attendance", {})
-        date_val = att.get("date", "")
+        raw_date = att.get("date", "")
         status_val = att.get("status", "")
         comment_val = att.get("comment", "")
+
+        # 1) Convert the date to a stable string for the record key
+        if isinstance(raw_date, datetime):
+            date_str = raw_date.isoformat()
+        else:
+            date_str = str(raw_date)  # fallback if it's already a string or empty
+
         s_name = doc.get("name", "")
         p_id = doc.get("program_id", 0)
         student_id = doc.get("student_id", "?")
 
         program_name = prog_map.get(p_id, f"Program ID={p_id}")
-        # Convert status to emoji label if recognized
         display_status = emoji_map.get(status_val, status_val)
-        
-        # Get background color based on status
-        # bg_color = status_colors.get(status_val, "#ffffff")
-        bg_color = "transparent"  # no background color
 
-        # Build a unique record key for tracking edit state
-        record_key = f"{student_id}_{date_val}"
+        # Build a stable record_key from (student_id + iso_date_str)
+        record_key = f"{student_id}_{date_str}"
+        is_editing = (st.session_state["edit_record_key"] == record_key)
+
+        # Prepare the label for the expander
+        expander_label = f"{s_name} | {program_name} | {date_str} | {display_status}"
         
-        # Check if this record is being edited
-        is_editing = st.session_state["edit_record_key"] == record_key
-        
-        # Build a short label for the expander
-        expander_label = f"{s_name} | {program_name} | {date_val} | {display_status}"
-        
-        # Determine if expander should be expanded (if editing)
         with st.expander(expander_label, expanded=is_editing):
+            # Check if this record is the same as the "delete candidate"
+            # for two-step deletion
+            if st.session_state["delete_candidate"] == record_key:
+                st.warning(f"⚠️ Are you sure you want to delete {s_name}'s record on {date_str}?")
+
+                # Confirm or Cancel
+                if st.button("Cancel Delete", key=f"cancel_delete_{idx}"):
+                    st.session_state["delete_candidate"] = None
+                    st.rerun()
+                if st.button("Confirm Delete", key=f"confirm_delete_{idx}"):
+                    with st.spinner("Deleting record..."):
+                        deleted = delete_attendance_subdoc(student_id, date_str)
+                        if deleted:
+                            st.success("✅ Attendance record deleted.")
+                            # Force re-fetch next time
+                            st.session_state["attendance_records"] = None
+                        else:
+                            st.warning("⚠️ No matching record found.")
+                        st.session_state["delete_candidate"] = None
+                        st.rerun()
+                # Skip the rest of the expander if we’re in delete confirm mode
+                continue
+
+            # If not editing:
             if not is_editing:
-                # Normal view mode with better layout
-                col1, col2 = st.columns([3, 1])
-                
-                with col1:
+                # Normal view mode
+                c1, c2 = st.columns([3, 1])
+                with c1:
                     st.markdown(f"""
-                    <div style="padding: 10px; border-radius: 5px; background-color: {bg_color};">
+                    <div style="padding: 10px; border-radius: 5px;">
                         <strong>Student:</strong> {s_name} (ID: {student_id})<br>
                         <strong>Program:</strong> {program_name}<br>
-                        <strong>Date:</strong> {date_val}<br>
-                        <strong>Status:</strong> {display_status}
+                        <strong>Date:</strong> {date_str}<br>
+                        <strong>Status:</strong> {display_status}<br>
+                        { f"**Comment:** {comment_val}" if comment_val else "" }
                     </div>
                     """, unsafe_allow_html=True)
-                    
-                    if comment_val:
-                        st.markdown(f"**Comment:** {comment_val}")
 
-                # Buttons for Delete / Edit
-                with col2:
+                with c2:
                     st.write("**Actions:**")
                     
-                    if st.button("✏️ Edit", key=f"edit_btn_{idx}",
-                               help=f"Edit this attendance record"):
-                        # Set this record as the one being edited
+                    # Edit Button
+                    if st.button("✏️ Edit", key=f"edit_btn_{idx}"):
+                        # Store info in session for the next run
                         st.session_state["edit_record_key"] = record_key
-                        # Store the current values for the form
                         st.session_state["edit_student_id"] = student_id
                         st.session_state["edit_student_name"] = s_name
-                        st.session_state["edit_date"] = date_val
+                        st.session_state["edit_date"] = date_str
                         st.session_state["edit_status"] = status_val
                         st.session_state["edit_comment"] = comment_val
                         st.rerun()
-                    
-                    if st.button("🗑️ Delete", key=f"delete_btn_{idx}",
-                               help=f"Delete this attendance record"):
-                        st.warning(f"Are you sure you want to delete this record?")
-                        col_cancel, col_confirm = st.columns(2)
-                        
-                        with col_cancel:
-                            if st.button("Cancel", key=f"cancel_delete_{idx}"):
-                                st.rerun()
-                                
-                        with col_confirm:
-                            if st.button("Confirm Delete", key=f"confirm_delete_{idx}"):
-                                with st.spinner("Deleting record..."):
-                                    deleted = delete_attendance_subdoc(student_id, date_val)
-                                    if deleted:
-                                        st.success("✅ Attendance record deleted.")
-                                        st.session_state["attendance_records"] = None
-                                    else:
-                                        st.warning("⚠️ No matching record found.")
-                                    st.rerun()
+
+                    # Delete Button (two-step approach)
+                    if st.button("🗑️ Delete", key=f"delete_btn_{idx}"):
+                        # Mark this record as the "delete candidate"
+                        st.session_state["delete_candidate"] = record_key
+                        st.rerun()
+
             else:
-                # Edit mode - show the form in the expander
+                # Edit mode
                 st.subheader("✏️ Edit Attendance Record")
-                
-                default_dt = st.session_state["edit_date"]
-                if isinstance(default_dt, str):
-                    try:
-                        default_dt = parser.parse(default_dt)
-                    except:
-                        default_dt = datetime.now()
-                
-                with st.form("edit_form"):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
+
+                # Parse the date string back into a datetime (if possible)
+                default_dt_str = st.session_state["edit_date"]
+                try:
+                    default_dt = datetime.fromisoformat(default_dt_str)
+                except ValueError:
+                    # fallback if it's not parseable
+                    default_dt = datetime.now()
+
+                with st.form(f"edit_form_{idx}"):
+                    left_col, right_col = st.columns(2)
+                    with left_col:
                         st.write(f"**Student Name**: {st.session_state['edit_student_name']}")
                         st.write(f"**Student ID**: {st.session_state['edit_student_id']}")
-                        st.write(f"**Original Date**: {st.session_state['edit_date']}")
-                    
-                    with col2:
+                        st.write(f"**Original Date**: {default_dt_str}")
+
+                    with right_col:
                         new_date = st.date_input("New Date", value=default_dt.date())
                         new_time = st.time_input("New Time", value=default_dt.time())
-                    
+
                     combined_dt = datetime.combine(new_date, new_time)
-                    
-                    # Status selection with icons
+
                     status_opts = ["Present", "Late", "Absent", "Excused"]
                     status_icons = ["✅", "🕒", "🚫", "🤝"]
                     status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opts)]
                     
+                    # figure out the default index
                     try:
                         default_idx = status_opts.index(st.session_state["edit_status"])
                     except ValueError:
                         default_idx = 0
-                    
+
                     selected_status_idx = st.selectbox(
                         "Status:", 
                         options=range(len(status_opts)),
@@ -3277,48 +3306,831 @@ def show_attendance_logs():
                         index=default_idx
                     )
                     new_status = status_opts[selected_status_idx]
-                    
-                    new_comment = st.text_area("Comment", value=st.session_state["edit_comment"], height=100)
-                    
-                    col1, col2 = st.columns([1, 1])
-                    
-                    with col1:
+
+                    new_comment = st.text_area(
+                        "Comment",
+                        value=st.session_state["edit_comment"],
+                        height=100
+                    )
+
+                    c1, c2 = st.columns([1, 1])
+                    with c1:
                         cancel_btn = st.form_submit_button("Cancel")
-                    
-                    with col2:
+                    with c2:
                         save_btn = st.form_submit_button("Save Changes")
-                    
+
                     if save_btn:
                         with st.spinner("Updating attendance record..."):
                             success = upsert_attendance_subdoc(
                                 student_id=st.session_state["edit_student_id"],
-                                target_date=combined_dt, 
+                                target_date=combined_dt,
                                 new_status=new_status,
                                 new_comment=new_comment
                             )
-                            
                             if success:
-                                st.success(f"✅ Attendance updated successfully.")
-                                # If date changed, remove old record
-                                old_date = st.session_state["edit_date"]
-                                if isinstance(old_date, str):
-                                    old_date = parser.parse(old_date)
-                                if combined_dt != old_date:
-                                    delete_attendance_subdoc(
-                                        st.session_state["edit_student_id"], 
-                                        st.session_state["edit_date"]
-                                    )
-                                # Reset edit state and refresh records
-                                st.session_state["edit_record_key"] = None
+                                st.success("✅ Attendance updated successfully.")
+
+                                # If the date changed, remove old record
+                                old_date_str = st.session_state["edit_date"]
+                                if isinstance(old_date_str, str):
+                                    try:
+                                        old_date_parsed = datetime.fromisoformat(old_date_str)
+                                    except ValueError:
+                                        old_date_parsed = None
+                                    if old_date_parsed and old_date_parsed != combined_dt:
+                                        delete_attendance_subdoc(
+                                            st.session_state["edit_student_id"],
+                                            old_date_str
+                                        )
+
+                                # Reset everything so we fetch fresh data
                                 st.session_state["attendance_records"] = None
+                                st.session_state["edit_record_key"] = None
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to update attendance record.")
-                    
+
                     if cancel_btn:
-                        # Reset edit state
                         st.session_state["edit_record_key"] = None
                         st.rerun()
+                        
+# def page_review_attendance():
+#     st.header("📊 Review Attendance Logs")
+    
+#     # Help expander
+#     with st.expander("ℹ️ How to review attendance", expanded=False):
+#         st.markdown("""
+#         ### Reviewing Attendance:
+#         - **Attendance Records**: View, edit, or delete individual attendance records
+#         - **Missed Counts**: See a summary of absent/missed sessions by student
+#         - Use the filters to narrow down records by program or student name
+        
+#         You can edit any record by clicking the Edit button in its panel.
+#         """)
+
+#     # -------------------------------------------------------------
+#     # A) Show summary metrics: This Week vs. Last Week
+#     # -------------------------------------------------------------
+#     now = datetime.utcnow()
+#     seven_days_ago = now - timedelta(days=7)
+#     fourteen_days_ago = now - timedelta(days=14)
+
+#     # 1) "This Week" subdocs
+#     subdocs_this_week = get_attendance_subdocs_in_range(seven_days_ago, now)
+#     total_this_week = len(subdocs_this_week)
+
+#     # 2) "Last Week" subdocs
+#     subdocs_last_week = get_attendance_subdocs_in_range(fourteen_days_ago, seven_days_ago)
+#     total_last_week = len(subdocs_last_week)
+#     attendance_delta = total_this_week - total_last_week
+
+#     # Admin vs. Instructor logic
+#     is_admin = st.session_state.get("is_admin", False)
+#     if is_admin:
+#         all_students = get_all_students()  # Admin sees all
+#     else:
+#         # Instructors see only assigned programs
+#         program_ids = st.session_state.get("instructor_program_ids", [])
+#         all_students = get_all_students(program_ids=program_ids)
+
+#     total_students = len(all_students)
+
+#     # Get last week's student count from ObjectId logic
+#     last_week_count = get_student_count_as_of_last_week()
+#     student_delta = total_students - last_week_count
+
+#     # Absent comparison
+#     absent_this_week = sum(1 for r in subdocs_this_week if r["attendance"]["status"] == "Absent")
+#     absent_last_week = sum(1 for r in subdocs_last_week if r["attendance"]["status"] == "Absent")
+#     delta_absent = absent_this_week - absent_last_week
+
+#     # -------------------------------------------------------------
+#     # B) Display the top-level metrics using st.metric and columns
+#     # -------------------------------------------------------------
+#     st.markdown("### Summary Metrics")
+#     col1, col2, col3 = st.columns(3)
+#     with col1:
+#         st.metric(
+#             label="Attendance Records This Week",
+#             value=total_this_week,
+#             delta=f"{attendance_delta}" if attendance_delta != 0 else None,
+#             delta_color="normal" if attendance_delta >= 0 else "inverse"
+#         )
+#     with col2:
+#         st.metric(
+#             label="Absences This Week",
+#             value=absent_this_week,
+#             delta=f"{delta_absent}" if delta_absent != 0 else None,
+#             delta_color="inverse"  # Fewer absences is good (green), more is bad (red)
+#         )
+#     with col3:
+#         st.metric(
+#             label="Total Active Students",
+#             value=total_students,
+#             delta=f"{student_delta}" if student_delta != 0 else None,
+#             delta_color="normal" if student_delta >= 0 else "inverse"
+#         )
+
+#     st.write("---")
+
+#     # -------------------------------------------------------------
+#     # C) Missed Counts and All Attendance in tabs
+#     # -------------------------------------------------------------
+#     tab1, tab2 = st.tabs(["📋 All Attendance Records", "🚫 Missed Sessions"])
+    
+#     with tab1:
+#         st.subheader("Attendance Records")
+#         show_attendance_logs()
+
+#     with tab2:
+#         st.subheader("Students with Missed Sessions")
+#         show_missed_counts()
+# def page_review_attendance():
+#     st.header("📊 Review Attendance Logs")
+    
+#     # Help expander
+#     with st.expander("ℹ️ How to review attendance", expanded=False):
+#         st.markdown("""
+#         ### Reviewing Attendance:
+#         - **Attendance Records**: View, edit, or delete individual attendance records
+#         - **Missed Counts**: See a summary of absent/missed sessions by student
+#         - Use the filters to narrow down records by program or student name
+        
+#         You can edit any record by clicking the Edit button in its panel.
+#         """)
+
+#     # -------------------------------------------------------------
+#     # A) Show summary metrics: This Week vs. Last Week
+#     # -------------------------------------------------------------
+#     now = datetime.utcnow()
+#     seven_days_ago = now - timedelta(days=7)
+#     fourteen_days_ago = now - timedelta(days=14)
+
+#     # 1) "This Week" subdocs
+#     subdocs_this_week = get_attendance_subdocs_in_range(seven_days_ago, now)
+#     total_this_week = len(subdocs_this_week)
+
+#     # 2) "Last Week" subdocs
+#     subdocs_last_week = get_attendance_subdocs_in_range(fourteen_days_ago, seven_days_ago)
+#     total_last_week = len(subdocs_last_week)
+#     attendance_delta = total_this_week - total_last_week
+
+#     # Admin vs. Instructor logic
+#     is_admin = st.session_state.get("is_admin", False)
+#     if is_admin:
+#         all_students = get_all_students()  # Admin sees all
+#     else:
+#         # Instructors see only assigned programs
+#         program_ids = st.session_state.get("instructor_program_ids", [])
+#         all_students = get_all_students(program_ids=program_ids)
+
+#     total_students = len(all_students)
+
+#     # Get last week's student count from ObjectId logic
+#     last_week_count = get_student_count_as_of_last_week()
+#     student_delta = total_students - last_week_count
+
+#     # Absent comparison
+#     absent_this_week = sum(1 for r in subdocs_this_week if r["attendance"]["status"] == "Absent")
+#     absent_last_week = sum(1 for r in subdocs_last_week if r["attendance"]["status"] == "Absent")
+#     delta_absent = absent_this_week - absent_last_week
+
+#     # -------------------------------------------------------------
+#     # B) Display the top-level metrics using st.metric and columns
+#     # -------------------------------------------------------------
+#     st.markdown("### Summary Metrics")
+#     col1, col2, col3 = st.columns(3)
+#     with col1:
+#         st.metric(
+#             label="Attendance Records This Week",
+#             value=total_this_week,
+#             delta=f"{attendance_delta}" if attendance_delta != 0 else None,
+#             delta_color="normal" if attendance_delta >= 0 else "inverse"
+#         )
+#     with col2:
+#         st.metric(
+#             label="Absences This Week",
+#             value=absent_this_week,
+#             delta=f"{delta_absent}" if delta_absent != 0 else None,
+#             delta_color="inverse"  # Fewer absences is good (green), more is bad (red)
+#         )
+#     with col3:
+#         st.metric(
+#             label="Total Active Students",
+#             value=total_students,
+#             delta=f"{student_delta}" if student_delta != 0 else None,
+#             delta_color="normal" if student_delta >= 0 else "inverse"
+#         )
+
+#     st.write("---")
+
+#     # -------------------------------------------------------------
+#     # C) Missed Counts and All Attendance in tabs
+#     # -------------------------------------------------------------
+#     tab1, tab2 = st.tabs(["📋 All Attendance Records", "🚫 Missed Sessions"])
+    
+#     with tab1:
+#         st.subheader("Attendance Records")
+#         show_attendance_logs()
+
+#     with tab2:
+#         st.subheader("Students with Missed Sessions")
+#         show_missed_counts()
+
+# def show_attendance_logs():
+#     # Initialize the edit state if not already done
+#     if "edit_record_key" not in st.session_state:
+#         st.session_state["edit_record_key"] = None
+    
+#     # ---------------------------------------------------------
+#     # 1) Load attendance records from session cache or DB
+#     # ---------------------------------------------------------
+#     if "attendance_records" not in st.session_state or st.session_state["attendance_records"] is None:
+#         try:
+#             with st.spinner("Loading attendance records..."):
+#                 records = get_all_attendance_subdocs()
+#                 st.session_state["attendance_records"] = records
+#         except Exception as e:
+#             st.error(f"❌ Error fetching attendance logs: {e}")
+#             st.session_state["attendance_records"] = []
+#             return
+
+#     logs = st.session_state["attendance_records"]
+#     if not logs:
+#         st.info("📌 No attendance records found.")
+#         return
+
+#     # ---------------------------------------------------------
+#     # 2) Admin or Instructor program filtering
+#     # ---------------------------------------------------------
+#     st.markdown("### 🔍 Filter Records")
+    
+#     col1, col2 = st.columns(2)
+    
+#     with col1:
+#         all_programs = list_programs()  # from instructors_db
+#         prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+#         is_admin = st.session_state.get("is_admin", False)
+
+#         if is_admin:
+#             # Admin sees a program filter
+#             program_choices = [(None, "All Programs")] + [
+#                 (p["program_id"], p["program_name"]) for p in all_programs
+#             ]
+#             selected_prog_id = st.selectbox(
+#                 "Filter by Program:",
+#                 options=[pc[0] for pc in program_choices],
+#                 format_func=lambda pid: "All Programs" if pid is None else f"{prog_map[pid]} (ID: {pid})",
+#                 help="Select a program to filter attendance records"
+#             )
+#             if selected_prog_id is not None:
+#                 logs = [
+#                     r for r in logs
+#                     if (r["program_id"] == selected_prog_id or selected_prog_id is None)
+#                 ]
+#         else:
+#             # Instructor sees only assigned programs
+#             permitted_ids = st.session_state.get("instructor_program_ids", [])
+#             logs = [r for r in logs if r.get("program_id") in permitted_ids]
+            
+#             # If instructor has multiple programs, offer a program filter
+#             if len(permitted_ids) > 1:
+#                 program_choices = [(None, "All My Programs")] + [
+#                     (pid, prog_map.get(pid, f"Program ID: {pid}")) for pid in permitted_ids
+#                 ]
+                
+#                 selected_prog_id = st.selectbox(
+#                     "Filter by Program:",
+#                     options=[pc[0] for pc in program_choices],
+#                     format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}",
+#                     help="Select a program to filter attendance records"
+#                 )
+                
+#                 if selected_prog_id is not None:
+#                     logs = [
+#                         r for r in logs
+#                         if (r["program_id"] == selected_prog_id or selected_prog_id is None)
+#                     ]
+
+#     # ---------------------------------------------------------
+#     # 3) Filter by Student Name
+#     # ---------------------------------------------------------
+#     with col2:
+#         all_names = sorted({doc.get("name", "Unknown") for doc in logs})
+#         name_choice = st.selectbox(
+#             "Filter by Student:",
+#             options=["All Students"] + all_names,
+#             help="Select a student to view only their attendance records"
+#         )
+#         if name_choice != "All Students":
+#             logs = [doc for doc in logs if doc.get("name") == name_choice]
+
+#     if not logs:
+#         st.info("📌 No attendance records found for that filter.")
+#         return
+        
+#     # Show total count of records
+#     st.success(f"Showing {len(logs)} attendance records")
+
+#     # ---------------------------------------------------------
+#     # 4) Allow sorting options
+#     # ---------------------------------------------------------
+#     sort_options = ["Date (Newest First)", "Date (Oldest First)", "Student Name", "Program", "Status"]
+#     sort_choice = st.selectbox(
+#         "Sort by:",
+#         options=sort_options,
+#         index=0,
+#         help="Choose how to sort the attendance records"
+#     )
+    
+#     # Apply sorting
+#     if sort_choice == "Date (Newest First)":
+#         logs = sorted(logs, key=lambda x: str(x.get("attendance", {}).get("date", "")), reverse=True)
+#     elif sort_choice == "Date (Oldest First)":
+#         logs = sorted(logs, key=lambda x: str(x.get("attendance", {}).get("date", "")))
+#     elif sort_choice == "Student Name":
+#         logs = sorted(logs, key=lambda x: x.get("name", ""))
+#     elif sort_choice == "Program":
+#         logs = sorted(logs, key=lambda x: prog_map.get(x.get("program_id", 0), ""))
+#     elif sort_choice == "Status":
+#         logs = sorted(logs, key=lambda x: x.get("attendance", {}).get("status", ""))
+    
+#     st.write("---")
+
+#     # ---------------------------------------------------------
+#     # 5) Display each record in an expander
+#     # ---------------------------------------------------------
+#     emoji_map = {
+#         "Present": "✅ Present",
+#         "Late": "🕑 Late",
+#         "Absent": "🚫 Absent",
+#         "Excused": "🤝 Excused"
+#     }
+    
+#     # status_colors = {
+#     #     "Present": "#d4f7d4",
+#     #     "Late": "#fff4d4",
+#     #     "Absent": "#ffd4d4",
+#     #     "Excused": "#e0e0e0"
+#     # }
+#     # We won't color the background to avoid deeper nesting issues:
+#     bg_color = "transparent"
+
+#     for idx, doc in enumerate(logs):
+#         att = doc.get("attendance", {})
+#         date_val = att.get("date", "")
+#         status_val = att.get("status", "")
+#         comment_val = att.get("comment", "")
+#         s_name = doc.get("name", "")
+#         p_id = doc.get("program_id", 0)
+#         student_id = doc.get("student_id", "?")
+
+#         program_name = prog_map.get(p_id, f"Program ID={p_id}")
+#         display_status = emoji_map.get(status_val, status_val)
+        
+#         record_key = f"{student_id}_{date_val}"
+#         is_editing = (st.session_state["edit_record_key"] == record_key)
+
+#         expander_label = f"{s_name} | {program_name} | {date_val} | {display_status}"
+        
+#         with st.expander(expander_label, expanded=is_editing):
+#             if not is_editing:
+#                 # Normal view mode
+#                 col1, col2 = st.columns([3, 1])
+                
+#                 with col1:
+#                     st.markdown(f"""
+#                     <div style="padding: 10px; border-radius: 5px; background-color: {bg_color};">
+#                         <strong>Student:</strong> {s_name} (ID: {student_id})<br>
+#                         <strong>Program:</strong> {program_name}<br>
+#                         <strong>Date:</strong> {date_val}<br>
+#                         <strong>Status:</strong> {display_status}
+#                     </div>
+#                     """, unsafe_allow_html=True)
+                    
+#                     if comment_val:
+#                         st.markdown(f"**Comment:** {comment_val}")
+
+#                 with col2:
+#                     st.write("**Actions:**")
+                    
+#                     if st.button("✏️ Edit", key=f"edit_btn_{idx}",
+#                                  help=f"Edit this attendance record"):
+#                         # Put record in edit mode
+#                         st.session_state["edit_record_key"] = record_key
+#                         st.session_state["edit_student_id"] = student_id
+#                         st.session_state["edit_student_name"] = s_name
+#                         st.session_state["edit_date"] = date_val
+#                         st.session_state["edit_status"] = status_val
+#                         st.session_state["edit_comment"] = comment_val
+#                         st.rerun()
+                    
+#                     # Delete button - **No columns** here to avoid triple nesting
+#                     if st.button("🗑️ Delete", key=f"delete_btn_{idx}",
+#                                  help=f"Delete this attendance record"):
+#                         st.warning(f"Are you sure you want to delete this record?")
+                        
+#                         # Just two separate buttons, no st.columns(2)
+#                         cancel_delete = st.button("Cancel", key=f"cancel_delete_{idx}")
+#                         confirm_delete = st.button("Confirm Delete", key=f"confirm_delete_{idx}")
+
+#                         if cancel_delete:
+#                             st.rerun()
+#                         if confirm_delete:
+#                             with st.spinner("Deleting record..."):
+#                                 deleted = delete_attendance_subdoc(student_id, date_val)
+#                                 if deleted:
+#                                     st.success("✅ Attendance record deleted.")
+#                                     st.session_state["attendance_records"] = None
+#                                 else:
+#                                     st.warning("⚠️ No matching record found.")
+#                                 st.rerun()
+
+#             else:
+#                 # Edit mode
+#                 st.subheader("✏️ Edit Attendance Record")
+                
+#                 default_dt = st.session_state["edit_date"]
+#                 if isinstance(default_dt, str):
+#                     try:
+#                         default_dt = parser.parse(default_dt)
+#                     except:
+#                         default_dt = datetime.now()
+                
+#                 with st.form("edit_form"):
+#                     col1, col2 = st.columns(2)
+                    
+#                     with col1:
+#                         st.write(f"**Student Name**: {st.session_state['edit_student_name']}")
+#                         st.write(f"**Student ID**: {st.session_state['edit_student_id']}")
+#                         st.write(f"**Original Date**: {st.session_state['edit_date']}")
+                    
+#                     with col2:
+#                         new_date = st.date_input("New Date", value=default_dt.date())
+#                         new_time = st.time_input("New Time", value=default_dt.time())
+                    
+#                     combined_dt = datetime.combine(new_date, new_time)
+                    
+#                     status_opts = ["Present", "Late", "Absent", "Excused"]
+#                     status_icons = ["✅", "🕒", "🚫", "🤝"]
+#                     status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opts)]
+                    
+#                     try:
+#                         default_idx = status_opts.index(st.session_state["edit_status"])
+#                     except ValueError:
+#                         default_idx = 0
+                    
+#                     selected_status_idx = st.selectbox(
+#                         "Status:", 
+#                         options=range(len(status_opts)),
+#                         format_func=lambda i: status_options_with_icons[i],
+#                         index=default_idx
+#                     )
+#                     new_status = status_opts[selected_status_idx]
+                    
+#                     new_comment = st.text_area("Comment", value=st.session_state["edit_comment"], height=100)
+                    
+#                     c1, c2 = st.columns([1, 1])
+#                     with c1:
+#                         cancel_btn = st.form_submit_button("Cancel")
+#                     with c2:
+#                         save_btn = st.form_submit_button("Save Changes")
+                    
+#                     if save_btn:
+#                         with st.spinner("Updating attendance record..."):
+#                             success = upsert_attendance_subdoc(
+#                                 student_id=st.session_state["edit_student_id"],
+#                                 target_date=combined_dt, 
+#                                 new_status=new_status,
+#                                 new_comment=new_comment
+#                             )
+                            
+#                             if success:
+#                                 st.success("✅ Attendance updated successfully.")
+#                                 # If date changed, remove old record
+#                                 old_date = st.session_state["edit_date"]
+#                                 if isinstance(old_date, str):
+#                                     old_date = parser.parse(old_date)
+#                                 if combined_dt != old_date:
+#                                     delete_attendance_subdoc(
+#                                         st.session_state["edit_student_id"], 
+#                                         st.session_state["edit_date"]
+#                                     )
+#                                 st.session_state["edit_record_key"] = None
+#                                 st.session_state["attendance_records"] = None
+#                                 st.rerun()
+#                             else:
+#                                 st.error("❌ Failed to update attendance record.")
+                    
+#                     if cancel_btn:
+#                         st.session_state["edit_record_key"] = None
+#                         st.rerun()
+# def show_attendance_logs():
+#     # Initialize the edit state if not already done
+#     if "edit_record_key" not in st.session_state:
+#         st.session_state["edit_record_key"] = None
+    
+#     # ---------------------------------------------------------
+#     # 1) Load attendance records from session cache or DB
+#     # ---------------------------------------------------------
+#     if "attendance_records" not in st.session_state or st.session_state["attendance_records"] is None:
+#         try:
+#             # Each record is like:
+#             # {"student_id":..., "name":..., "program_id":..., 
+#             #  "attendance":{"date":..., "status":..., "comment":...}}
+#             with st.spinner("Loading attendance records..."):
+#                 records = get_all_attendance_subdocs()
+#                 st.session_state["attendance_records"] = records
+#         except Exception as e:
+#             st.error(f"❌ Error fetching attendance logs: {e}")
+#             st.session_state["attendance_records"] = []
+#             return
+
+#     logs = st.session_state["attendance_records"]
+#     if not logs:
+#         st.info("📌 No attendance records found.")
+#         return
+
+#     # ---------------------------------------------------------
+#     # 2) Admin or Instructor program filtering
+#     # ---------------------------------------------------------
+#     st.markdown("### 🔍 Filter Records")
+    
+#     col1, col2 = st.columns(2)
+    
+#     with col1:
+#         all_programs = list_programs()  # from instructors_db
+#         prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+#         is_admin = st.session_state.get("is_admin", False)
+
+#         if is_admin:
+#             # Admin sees a program filter
+#             program_choices = [(None, "All Programs")] + [
+#                 (p["program_id"], p["program_name"]) for p in all_programs
+#             ]
+#             selected_prog_id = st.selectbox(
+#                 "Filter by Program:",
+#                 options=[pc[0] for pc in program_choices],
+#                 format_func=lambda pid: "All Programs" if pid is None else f"{prog_map[pid]} (ID: {pid})",
+#                 help="Select a program to filter attendance records"
+#             )
+#             if selected_prog_id is not None:
+#                 logs = [
+#                     r for r in logs
+#                     if (r["program_id"] == selected_prog_id or selected_prog_id is None)
+#                 ]
+#         else:
+#             # Instructor sees only assigned programs
+#             permitted_ids = st.session_state.get("instructor_program_ids", [])
+#             logs = [r for r in logs if r.get("program_id") in permitted_ids]
+            
+#             # If instructor has multiple programs, offer a program filter
+#             if len(permitted_ids) > 1:
+#                 program_choices = [(None, "All My Programs")] + [
+#                     (pid, prog_map.get(pid, f"Program ID: {pid}")) for pid in permitted_ids
+#                 ]
+                
+#                 selected_prog_id = st.selectbox(
+#                     "Filter by Program:",
+#                     options=[pc[0] for pc in program_choices],
+#                     format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}",
+#                     help="Select a program to filter attendance records"
+#                 )
+                
+#                 if selected_prog_id is not None:
+#                     logs = [
+#                         r for r in logs
+#                         if (r["program_id"] == selected_prog_id or selected_prog_id is None)
+#                     ]
+
+#     # ---------------------------------------------------------
+#     # 3) Filter by Student Name
+#     # ---------------------------------------------------------
+#     with col2:
+#         all_names = sorted({doc.get("name", "Unknown") for doc in logs})
+#         name_choice = st.selectbox(
+#             "Filter by Student:",
+#             options=["All Students"] + all_names,
+#             help="Select a student to view only their attendance records"
+#         )
+#         if name_choice != "All Students":
+#             logs = [doc for doc in logs if doc.get("name") == name_choice]
+
+#     if not logs:
+#         st.info("📌 No attendance records found for that filter.")
+#         return
+        
+#     # Show total count of records
+#     st.success(f"Showing {len(logs)} attendance records")
+
+#     # ---------------------------------------------------------
+#     # 4) Allow sorting options
+#     # ---------------------------------------------------------
+#     sort_options = ["Date (Newest First)", "Date (Oldest First)", "Student Name", "Program", "Status"]
+#     sort_choice = st.selectbox(
+#         "Sort by:",
+#         options=sort_options,
+#         index=0,
+#         help="Choose how to sort the attendance records"
+#     )
+    
+#     # Apply sorting
+#     if sort_choice == "Date (Newest First)":
+#         logs = sorted(logs, key=lambda x: str(x.get("attendance", {}).get("date", "")), reverse=True)
+#     elif sort_choice == "Date (Oldest First)":
+#         logs = sorted(logs, key=lambda x: str(x.get("attendance", {}).get("date", "")))
+#     elif sort_choice == "Student Name":
+#         logs = sorted(logs, key=lambda x: x.get("name", ""))
+#     elif sort_choice == "Program":
+#         logs = sorted(logs, key=lambda x: prog_map.get(x.get("program_id", 0), ""))
+#     elif sort_choice == "Status":
+#         logs = sorted(logs, key=lambda x: x.get("attendance", {}).get("status", ""))
+    
+#     st.write("---")
+
+#     # ---------------------------------------------------------
+#     # 5) Display each record in an expander with color-coded/emoji status
+#     # ---------------------------------------------------------
+#     # We'll map "Present" -> "✅ Present", "Late" -> "🕑 Late", etc.
+#     emoji_map = {
+#         "Present": "✅ Present",
+#         "Late": "🕑 Late",
+#         "Absent": "🚫 Absent",
+#         "Excused": "🤝 Excused"
+#     }
+    
+#     # Background colors for statuses
+#     status_colors = {
+#         "Present": "#d4f7d4",  # light green
+#         "Late": "#fff4d4",     # light yellow
+#         "Absent": "#ffd4d4",   # light red
+#         "Excused": "#e0e0e0"   # light gray
+#     }
+
+#     for idx, doc in enumerate(logs):
+#         att = doc.get("attendance", {})
+#         date_val = att.get("date", "")
+#         status_val = att.get("status", "")
+#         comment_val = att.get("comment", "")
+#         s_name = doc.get("name", "")
+#         p_id = doc.get("program_id", 0)
+#         student_id = doc.get("student_id", "?")
+
+#         program_name = prog_map.get(p_id, f"Program ID={p_id}")
+#         # Convert status to emoji label if recognized
+#         display_status = emoji_map.get(status_val, status_val)
+        
+#         # Get background color based on status
+#         # bg_color = status_colors.get(status_val, "#ffffff")
+#         bg_color = "transparent"  # no background color
+
+#         # Build a unique record key for tracking edit state
+#         record_key = f"{student_id}_{date_val}"
+        
+#         # Check if this record is being edited
+#         is_editing = st.session_state["edit_record_key"] == record_key
+        
+#         # Build a short label for the expander
+#         expander_label = f"{s_name} | {program_name} | {date_val} | {display_status}"
+        
+#         # Determine if expander should be expanded (if editing)
+#         with st.expander(expander_label, expanded=is_editing):
+#             if not is_editing:
+#                 # Normal view mode with better layout
+#                 col1, col2 = st.columns([3, 1])
+                
+#                 with col1:
+#                     st.markdown(f"""
+#                     <div style="padding: 10px; border-radius: 5px; background-color: {bg_color};">
+#                         <strong>Student:</strong> {s_name} (ID: {student_id})<br>
+#                         <strong>Program:</strong> {program_name}<br>
+#                         <strong>Date:</strong> {date_val}<br>
+#                         <strong>Status:</strong> {display_status}
+#                     </div>
+#                     """, unsafe_allow_html=True)
+                    
+#                     if comment_val:
+#                         st.markdown(f"**Comment:** {comment_val}")
+
+#                 # Buttons for Delete / Edit
+#                 with col2:
+#                     st.write("**Actions:**")
+                    
+#                     if st.button("✏️ Edit", key=f"edit_btn_{idx}",
+#                                help=f"Edit this attendance record"):
+#                         # Set this record as the one being edited
+#                         st.session_state["edit_record_key"] = record_key
+#                         # Store the current values for the form
+#                         st.session_state["edit_student_id"] = student_id
+#                         st.session_state["edit_student_name"] = s_name
+#                         st.session_state["edit_date"] = date_val
+#                         st.session_state["edit_status"] = status_val
+#                         st.session_state["edit_comment"] = comment_val
+#                         st.rerun()
+                    
+#                     if st.button("🗑️ Delete", key=f"delete_btn_{idx}",
+#                                help=f"Delete this attendance record"):
+#                         st.warning(f"Are you sure you want to delete this record?")
+#                         col_cancel, col_confirm = st.columns(2)
+                        
+#                         with col_cancel:
+#                             if st.button("Cancel", key=f"cancel_delete_{idx}"):
+#                                 st.rerun()
+                                
+#                         with col_confirm:
+#                             if st.button("Confirm Delete", key=f"confirm_delete_{idx}"):
+#                                 with st.spinner("Deleting record..."):
+#                                     deleted = delete_attendance_subdoc(student_id, date_val)
+#                                     if deleted:
+#                                         st.success("✅ Attendance record deleted.")
+#                                         st.session_state["attendance_records"] = None
+#                                     else:
+#                                         st.warning("⚠️ No matching record found.")
+#                                     st.rerun()
+#             else:
+#                 # Edit mode - show the form in the expander
+#                 st.subheader("✏️ Edit Attendance Record")
+                
+#                 default_dt = st.session_state["edit_date"]
+#                 if isinstance(default_dt, str):
+#                     try:
+#                         default_dt = parser.parse(default_dt)
+#                     except:
+#                         default_dt = datetime.now()
+                
+#                 with st.form("edit_form"):
+#                     col1, col2 = st.columns(2)
+                    
+#                     with col1:
+#                         st.write(f"**Student Name**: {st.session_state['edit_student_name']}")
+#                         st.write(f"**Student ID**: {st.session_state['edit_student_id']}")
+#                         st.write(f"**Original Date**: {st.session_state['edit_date']}")
+                    
+#                     with col2:
+#                         new_date = st.date_input("New Date", value=default_dt.date())
+#                         new_time = st.time_input("New Time", value=default_dt.time())
+                    
+#                     combined_dt = datetime.combine(new_date, new_time)
+                    
+#                     # Status selection with icons
+#                     status_opts = ["Present", "Late", "Absent", "Excused"]
+#                     status_icons = ["✅", "🕒", "🚫", "🤝"]
+#                     status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opts)]
+                    
+#                     try:
+#                         default_idx = status_opts.index(st.session_state["edit_status"])
+#                     except ValueError:
+#                         default_idx = 0
+                    
+#                     selected_status_idx = st.selectbox(
+#                         "Status:", 
+#                         options=range(len(status_opts)),
+#                         format_func=lambda i: status_options_with_icons[i],
+#                         index=default_idx
+#                     )
+#                     new_status = status_opts[selected_status_idx]
+                    
+#                     new_comment = st.text_area("Comment", value=st.session_state["edit_comment"], height=100)
+                    
+#                     col1, col2 = st.columns([1, 1])
+                    
+#                     with col1:
+#                         cancel_btn = st.form_submit_button("Cancel")
+                    
+#                     with col2:
+#                         save_btn = st.form_submit_button("Save Changes")
+                    
+#                     if save_btn:
+#                         with st.spinner("Updating attendance record..."):
+#                             success = upsert_attendance_subdoc(
+#                                 student_id=st.session_state["edit_student_id"],
+#                                 target_date=combined_dt, 
+#                                 new_status=new_status,
+#                                 new_comment=new_comment
+#                             )
+                            
+#                             if success:
+#                                 st.success(f"✅ Attendance updated successfully.")
+#                                 # If date changed, remove old record
+#                                 old_date = st.session_state["edit_date"]
+#                                 if isinstance(old_date, str):
+#                                     old_date = parser.parse(old_date)
+#                                 if combined_dt != old_date:
+#                                     delete_attendance_subdoc(
+#                                         st.session_state["edit_student_id"], 
+#                                         st.session_state["edit_date"]
+#                                     )
+#                                 # Reset edit state and refresh records
+#                                 st.session_state["edit_record_key"] = None
+#                                 st.session_state["attendance_records"] = None
+#                                 st.rerun()
+#                             else:
+#                                 st.error("❌ Failed to update attendance record.")
+                    
+#                     if cancel_btn:
+#                         # Reset edit state
+#                         st.session_state["edit_record_key"] = None
+#                         st.rerun()
 #####################
 # PAGE: Take Attendance
 #####################
