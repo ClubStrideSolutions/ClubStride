@@ -338,7 +338,7 @@ def page_my_settings():
     # Let’s do a radio for the two actions:
     setting_choice = st.radio(
         "Choose an action",
-        ["Change My Password", "Logout"],
+        ["Logout","Change My Password"],
         horizontal=True
     )
 
