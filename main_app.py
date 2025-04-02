@@ -4,12 +4,13 @@ import streamlit as st
 from streamlit_option_menu import option_menu
 import streamlit.components.v1 as components
 from PIL import Image
-
+# from . import page_manage_documents
 # Page imports (same as before)
 from pages import (
     page_manage_instructors,
     page_manage_students,
     page_take_attendance,
+    page_manage_documents,
     page_review_attendance,
     page_generate_reports,
     page_help,
@@ -25,24 +26,24 @@ from students_db import check_admin
 # Create instructors table
 from instructors_db import create_instructors_table #authenticate_instructor, list_instructor_programs
 
-def admin_login():
-    col_left, col_center, col_right = st.columns([1, 5, 1])
-    with col_center:
-        st.header("Admin Login")
+# def admin_login():
+#     col_left, col_center, col_right = st.columns([1, 5, 1])
+#     with col_center:
+#         st.header("Admin Login")
 
-        if st.session_state.get("instructor_logged_in", False):
-            st.error("An instructor is currently logged in. Please log out as instructor before logging in as admin.")
-            return
+#         if st.session_state.get("instructor_logged_in", False):
+#             st.error("An instructor is currently logged in. Please log out as instructor before logging in as admin.")
+#             return
         
-        conn_str = st.text_input("MongoDB Connection String", type="password")
-        if st.button("Submit"):
-            if check_admin(conn_str):
-                st.session_state.is_admin = True
-                st.success("Admin access granted!")
-                st.session_state.menu_choice = "Manage Instructors"
-                st.rerun()
-            else:
-                st.error("Invalid connection string. Access denied.")
+#         conn_str = st.text_input("MongoDB Connection String", type="password")
+#         if st.button("Submit"):
+#             if check_admin(conn_str):
+#                 st.session_state.is_admin = True
+#                 st.success("Admin access granted!")
+#                 st.session_state.menu_choice = "Manage Instructors"
+#                 st.rerun()
+#             else:
+#                 st.error("Invalid connection string. Access denied.")
 
 
 def main():
@@ -486,7 +487,7 @@ def main():
         # Show tabs for the four tools: Manage Students, Manage Attendance,
         # Manage Schedules, Generate Reports
         
-        SMStabs = st.tabs(["Manage Students", "Attendance & Scheduling", "Generate Reports"])
+        SMStabs = st.tabs(["Manage Students", "Attendance & Scheduling", "Generate Reports","Document Management"])
 
         # ----- TAB 1: Manage Students -----
         with SMStabs[0]:
@@ -530,6 +531,12 @@ def main():
             # st.header("Generate Reports")
             if st.session_state.is_admin or st.session_state.instructor_logged_in:
                 page_generate_reports()
+            else:
+                st.error("You do not have permission to access this feature.")
+
+        with SMStabs[3]:  # New tab for Document Management
+            if st.session_state.is_admin or st.session_state.instructor_logged_in:
+                page_manage_documents()
             else:
                 st.error("You do not have permission to access this feature.")
 

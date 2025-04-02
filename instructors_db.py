@@ -115,6 +115,169 @@ def add_instructor(username: str, password: str, role: str) -> bool:
         cursor.close()
         conn.close()
 
+def update_instructor_email(instructor_id: int, email: str) -> bool:
+    """
+    Update an instructor's email address.
+    Returns True if successful, False otherwise.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            ALTER TABLE instructors 
+            ADD COLUMN IF NOT EXISTS email TEXT;
+            """
+        )
+        conn.commit()
+        
+        cursor.execute(
+            """
+            UPDATE instructors
+            SET email = %s
+            WHERE instructor_id = %s
+            """,
+            (email, instructor_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    except Exception as e:
+        print(f"Error updating instructor email: {e}")
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+
+
+def get_instructor_email(instructor_id: int) -> str:
+    """
+    Retrieve an instructor's email address.
+    Returns the email string or empty string if not found.
+    """
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        # First ensure the column exists
+        cursor.execute(
+            """
+            ALTER TABLE instructors 
+            ADD COLUMN IF NOT EXISTS email TEXT;
+            """
+        )
+        conn.commit()
+        
+        cursor.execute(
+            """
+            SELECT email 
+            FROM instructors
+            WHERE instructor_id = %s
+            """,
+            (instructor_id,)
+        )
+        result = cursor.fetchone()
+        return result[0] if result and result[0] else ""
+    except Exception as e:
+        print(f"Error getting instructor email: {e}")
+        return ""
+    finally:
+        cursor.close()
+        conn.close()
+
+from mailersend import emails
+
+def notify_instructor_program_assignment(instructor_id: int, program_id: int, is_new_assignment=True):
+    """
+    Send an email notification to an instructor when they're assigned to a program.
+    
+    Args:
+        instructor_id: The ID of the instructor being assigned
+        program_id: The ID of the program they're assigned to
+        is_new_assignment: True if this is a new assignment, False if removed
+    """
+    # 1. Get instructor email
+    instructor_email = get_instructor_email(instructor_id)
+    if not instructor_email:
+        print(f"No email found for instructor ID {instructor_id}. Notification not sent.")
+        return False
+    
+    # 2. Get instructor name
+    all_instructors = list_instructors()
+    instructor_name = "Instructor"
+    for instr in all_instructors:
+        if instr["instructor_id"] == instructor_id:
+            instructor_name = instr["username"]
+            break
+    
+    # 3. Get program name
+    all_programs = list_programs()
+    program_name = f"Program ID: {program_id}"
+    for prog in all_programs:
+        if prog["program_id"] == program_id:
+            program_name = prog["program_name"]
+            break
+    
+    # 4. Compose email
+    action = "assigned to" if is_new_assignment else "removed from"
+    subject_line = f"Club Stride: You have been {action} {program_name}"
+    
+    if is_new_assignment:
+        body_text = f"""
+Hello {instructor_name},
+
+You have been assigned to the following program in the Club Stride Attendance System:
+
+Program: {program_name}
+
+You can now access student records, take attendance, and generate reports for this program.
+Please log in to the system to view your updated assignments.
+
+Thank you,
+Club Stride Administration
+        """
+    else:
+        body_text = f"""
+Hello {instructor_name},
+
+You have been removed from the following program in the Club Stride Attendance System:
+
+Program: {program_name}
+
+You will no longer have access to student records for this program.
+If you believe this is an error, please contact the administrator.
+
+Thank you,
+Club Stride Administration
+        """
+    
+    # 5. Send email via MailerSend
+    try:
+        MAILERSEND_API_KEY = st.secrets["MAILERSEND_API_KEY"]
+        
+        mailer = emails.NewEmail(MAILERSEND_API_KEY)
+        mail_body = {}
+        
+        mail_from = {
+            "name": "Club Stride Administration",
+            "email": "javier@clubstride.org"
+        }
+        
+        recipients = [{
+            "name": instructor_name,
+            "email": instructor_email
+        }]
+        
+        mailer.set_mail_from(mail_from, mail_body)
+        mailer.set_mail_to(recipients, mail_body)
+        mailer.set_subject(subject_line, mail_body)
+        mailer.set_plaintext_content(body_text, mail_body)
+        
+        response = mailer.send(mail_body)
+        print(f"MailerSend instructor notification response: {response}")
+        return True
+    except Exception as e:
+        print(f"Error sending instructor notification: {e}")
+        return False
+    
 def list_instructors():
     """Return all instructors (excluding password hash)."""
     conn = get_connection()
@@ -279,12 +442,9 @@ def list_programs() -> list:
         })
     return results
 
-############################################
-# INSTRUCTOR ↔ PROGRAMS RELATION
-############################################
 def assign_instructor_to_program(instructor_id: int, program_id: int) -> bool:
     """
-    Insert a row into instructor_programs.
+    Insert a row into instructor_programs and notify the instructor.
     Returns True if inserted, False if already existing or error.
     """
     conn = get_connection()
@@ -298,35 +458,106 @@ def assign_instructor_to_program(instructor_id: int, program_id: int) -> bool:
             """,
             (instructor_id, program_id)
         )
-        conn.commit()
-        # rowcount won't work for ON CONFLICT DO NOTHING to detect duplicates
-        return True
-    except psycopg2.Error as e:
-        print("Error assigning instructor to program:", e)
+        
+        # Check if a row was actually inserted (not a duplicate)
+        if cursor.rowcount > 0:
+            conn.commit()
+            # Send notification email
+            notify_instructor_program_assignment(instructor_id, program_id, is_new_assignment=True)
+            return True
+        else:
+            # No rows affected (likely a duplicate)
+            conn.commit()
+            return False
+    except Exception as e:
+        print(f"Error assigning instructor to program: {e}")
+        conn.rollback()
         return False
     finally:
         cursor.close()
         conn.close()
 
+# Also modify the remove_instructor_from_program function
 def remove_instructor_from_program(instructor_id: int, program_id: int) -> bool:
     """
-    Remove the row from instructor_programs.
-    Returns True if a row was deleted, False otherwise.
+    Remove the row from instructor_programs and notify the instructor.
+    Returns True if a row was deleted, else False.
     """
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(
-        """
-        DELETE FROM instructor_programs
-        WHERE instructor_id = %s AND program_id = %s
-        """,
-        (instructor_id, program_id)
-    )
-    conn.commit()
-    deleted = (cursor.rowcount > 0)
-    cursor.close()
-    conn.close()
-    return deleted
+    try:
+        cursor.execute(
+            """
+            DELETE FROM instructor_programs
+            WHERE instructor_id = %s AND program_id = %s
+            """,
+            (instructor_id, program_id)
+        )
+        
+        deleted = (cursor.rowcount > 0)
+        conn.commit()
+        
+        if deleted:
+            # Send notification email
+            notify_instructor_program_assignment(instructor_id, program_id, is_new_assignment=False)
+        
+        return deleted
+    except Exception as e:
+        print(f"Error removing instructor from program: {e}")
+        conn.rollback()
+        return False
+    finally:
+        cursor.close()
+        conn.close()
+        
+############################################
+# INSTRUCTOR ↔ PROGRAMS RELATION
+############################################
+# def assign_instructor_to_program(instructor_id: int, program_id: int) -> bool:
+#     """
+#     Insert a row into instructor_programs.
+#     Returns True if inserted, False if already existing or error.
+#     """
+#     conn = get_connection()
+#     cursor = conn.cursor()
+#     try:
+#         cursor.execute(
+#             """
+#             INSERT INTO instructor_programs (instructor_id, program_id)
+#             VALUES (%s, %s)
+#             ON CONFLICT DO NOTHING
+#             """,
+#             (instructor_id, program_id)
+#         )
+#         conn.commit()
+#         # rowcount won't work for ON CONFLICT DO NOTHING to detect duplicates
+#         return True
+#     except psycopg2.Error as e:
+#         print("Error assigning instructor to program:", e)
+#         return False
+#     finally:
+#         cursor.close()
+#         conn.close()
+
+# def remove_instructor_from_program(instructor_id: int, program_id: int) -> bool:
+#     """
+#     Remove the row from instructor_programs.
+#     Returns True if a row was deleted, False otherwise.
+#     """
+#     conn = get_connection()
+#     cursor = conn.cursor()
+#     cursor.execute(
+#         """
+#         DELETE FROM instructor_programs
+#         WHERE instructor_id = %s AND program_id = %s
+#         """,
+#         (instructor_id, program_id)
+#     )
+#     conn.commit()
+#     deleted = (cursor.rowcount > 0)
+#     cursor.close()
+#     conn.close()
+#     return deleted
 
 
 def list_instructor_programs(instructor_id: int) -> list:

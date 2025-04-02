@@ -1,62 +1,52 @@
 
-
+# import pygwalker as pyg
+# import streamlit.components.v1 as components
+# import sweetviz
 # pages.py
 
 import streamlit as st
-import pygwalker as pyg
 from streamlit_extras.dataframe_explorer import dataframe_explorer
-import streamlit.components.v1 as components
-import sweetviz
 import pandas as pd
 from datetime import datetime, time, date,timedelta
 from dateutil import parser
 import plotly.express as px
-import io
+from pathlib import Path
+import openai
+from openai import OpenAI
+from datetime import datetime, time, date
+import pandas as pd
+import plotly.express as px
+import io, os
+from collections import Counter
 
 
 from instructors_db import (
-    initialize_tables,
-    list_instructors,
-    list_programs,
-    add_program,
-    assign_instructor_to_program,
-    remove_instructor_from_program,
-    list_instructor_programs,
-    add_instructor,
-    update_program,
-    update_instructor_role,
-    delete_instructor,
-    authenticate_instructor,
-    update_instructor_password,
-    delete_program
+    initialize_tables, list_instructors, list_programs, add_program,
+    assign_instructor_to_program, remove_instructor_from_program, list_instructor_programs,
+    add_instructor, update_instructor_email, get_instructor_email,
+    update_program, update_instructor_role, delete_instructor,
+    authenticate_instructor, update_instructor_password, delete_program
 )
 
 from students_db import (
-    store_student_record,
-    get_all_students,
-    record_student_attendance_in_array,
-    get_all_attendance_subdocs,
-    delete_attendance_subdoc,       # <--- Import the new function
-    upsert_attendance_subdoc,    
-    get_missed_counts_for_all_students,
-    delete_student_record,
-    update_attendance_subdoc,
-    fetch_all_attendance_records,
-    update_student_info,
-    check_admin,
-    get_student_count_as_of_last_week,
-    get_attendance_subdocs_in_range,        # newly added
-    get_attendance_subdocs_last_week 
+    store_student_record, get_all_students, record_student_attendance_in_array,
+    get_all_attendance_subdocs, delete_attendance_subdoc, upsert_attendance_subdoc,    
+    get_missed_counts_for_all_students, delete_student_record, update_attendance_subdoc,
+    fetch_all_attendance_records, update_student_info, check_admin,
+    get_student_count_as_of_last_week, get_attendance_subdocs_in_range, get_attendance_subdocs_last_week 
 )
 
 from schedules_db import (
-    create_schedule,
-    list_schedules,
-    list_schedules_by_program,
-    update_schedule,
-    notify_schedule_change,
-    delete_schedule
+    create_schedule, list_schedules, list_schedules_by_program,
+    update_schedule, notify_schedule_change,delete_schedule)
+
+from documents_db import (
+    create_document, list_documents, create_document_instance,
+    send_document, update_document_status, get_document_status_counts,
+    send_reminder, get_documents_for_recipient, search_documents_by_recipient, 
+    delete_document, check_document_instance_exists
 )
+from document_storage import save_uploaded_document, get_document_file_path
 
 # Admin check
 
@@ -65,15 +55,119 @@ from schedules_db import (
 # UTILITY: Get permitted program NAMES
 ###################################
 
+def handle_mark_attendance_today(single_stud):
+    with st.form("today_attendance_form"):
+        st.write(f"**Recording attendance for: {single_stud['name']}**")
+        current_dt = datetime.now()
+        st.write(f"Date: {current_dt.strftime('%Y-%m-%d')}")
+        st.write(f"Time: {current_dt.strftime('%H:%M')}")
 
-import streamlit as st
-from datetime import datetime, time, date
+        status_opt = ["Present", "Late", "Absent", "Excused"]
+        status_icons = ["✅", "🕒", "❌", "🔖"]
+        status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opt)]
 
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-import io
-# from datetime import datetime
+        selected_status_idx = st.selectbox(
+            "Status:",
+            options=range(len(status_opt)),
+            format_func=lambda i: status_options_with_icons[i],
+            index=0
+        )
+        chosen_status = status_opt[selected_status_idx]
+
+        comment_txt = st.text_area("Comment (Optional)", height=100)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            cancel_btn = st.form_submit_button("Cancel")
+
+        with col2:
+            submit_btn = st.form_submit_button("Submit Attendance")
+
+        if submit_btn:
+            with st.spinner("Recording attendance..."):
+                try:
+                    # Pass the student_id directly to avoid regenerating it
+                    msg = record_student_attendance_in_array(
+                        name=single_stud["name"],
+                        program_id=single_stud["program_id"],
+                        status=chosen_status,
+                        comment=comment_txt,
+                        attendance_date=current_dt,
+                        student_id=single_stud["student_id"]  # Pass the existing student_id
+                    )
+                    st.success(f"✅ Marked {single_stud['name']} as {chosen_status}. {msg}")
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
+
+                st.session_state.pop("attendance_student", None)
+                st.session_state.pop("attendance_mode", None)
+                st.rerun()
+
+        if cancel_btn:
+            st.session_state.pop("attendance_student", None)
+            st.session_state.pop("attendance_mode", None)
+            st.info("ℹ️ Individual attendance marking canceled.")
+            st.rerun()
+
+
+# Similarly, for the "Mark Past" attendance form:
+def handle_mark_attendance_past(single_stud):
+    with st.form("past_attendance_form_students"):
+        st.write(f"**Recording past attendance for: {single_stud['name']}**")
+
+        date_val = st.date_input("Session Date", value=date.today())
+        time_val = st.time_input("Session Time", value=time(9, 0))
+        combined_dt = datetime.combine(date_val, time_val)
+
+        status_opt = ["Present", "Late", "Absent", "Excused"]
+        status_icons = ["✅", "🕒", "❌", "🔖"]
+        status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opt)]
+
+        selected_status_idx = st.selectbox(
+            "Status:",
+            options=range(len(status_opt)),
+            format_func=lambda i: status_options_with_icons[i],
+            index=0
+        )
+        chosen_status = status_opt[selected_status_idx]
+
+        comment_txt = st.text_area("Comment (Optional)", height=100)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            cancel_btn = st.form_submit_button("Cancel")
+
+        with col2:
+            submit_btn = st.form_submit_button("Submit Past Attendance")
+
+        if submit_btn:
+            with st.spinner("Recording past attendance..."):
+                try:
+                    # Pass the student_id directly to avoid regenerating it
+                    msg = record_student_attendance_in_array(
+                        name=single_stud["name"],
+                        program_id=single_stud["program_id"],
+                        status=chosen_status,
+                        comment=comment_txt,
+                        attendance_date=combined_dt,
+                        student_id=single_stud["student_id"]  # Pass the existing student_id
+                    )
+                    st.success(
+                        f"✅ Marked {single_stud['name']} as {chosen_status} on "
+                        f"{combined_dt.strftime('%Y-%m-%d %H:%M')}. {msg}"
+                    )
+                except Exception as e:
+                    st.error(f"❌ Error: {e}")
+
+                st.session_state.pop("attendance_student", None)
+                st.session_state.pop("attendance_mode", None)
+                st.rerun()
+
+        if cancel_btn:
+            st.session_state.pop("attendance_student", None)
+            st.session_state.pop("attendance_mode", None)
+            st.info("ℹ️ Past attendance marking canceled.")
+            st.rerun()
 
 
 def _format_time_12h(t):
@@ -81,8 +175,6 @@ def _format_time_12h(t):
     Safely handle both a time object and a "HH:MM:SS" string.
     Returns a 12-hour formatted string like "9:00 AM".
     """
-    from datetime import time
-
     if isinstance(t, str):
         # Parse "HH:MM:SS" (or "HH:MM") into a time object
         parts = t.split(":")
@@ -116,27 +208,9 @@ def get_permitted_program_names():
 # ------------------------------------
 
 # Make sure you have these helper imports or adapt them to your structure:
-from students_db import (
-    get_attendance_subdocs_in_range,
-    get_all_students,
-    get_attendance_subdocs_last_week
-)
 
 
 # pages.py
-import streamlit as st
-from datetime import datetime, timedelta
-from dateutil import parser
-import pandas as pd
-import plotly.express as px
-from collections import Counter
-
-from students_db import (
-    get_all_students,
-    get_attendance_subdocs_in_range
-)
-
-
 
 def page_dashboard():
     st.header("Program Dashboard")
@@ -261,19 +335,6 @@ def page_dashboard():
             delta=f"{rate_delta:+.1f}% vs. last week"
         )
 
-    # --------------------------------------------------------
-    # 9) Check for new absences in last 24 hours
-    # --------------------------------------------------------
-    # last_24_hours = now - timedelta(hours=24)
-    # new_absences_24 = [
-    #     d for d in subdocs_this_week
-    #     if parser.parse(str(d["attendance"]["date"])) >= last_24_hours
-    #     and d["attendance"]["status"] == "Absent"
-    # ]
-    # if new_absences_24:
-    #     st.warning(f"{len(new_absences_24)} new absence(s) in the last 24 hours.")
-    # else:
-    #     st.success("No new absences in the last 24 hours.")
 
     # --------------------------------------------------------
     # 10) Top Absent Students (This Week)
@@ -325,8 +386,6 @@ def page_dashboard():
     st.write("---")
     st.info("Use the sidebar for additional navigation and tools.")
 
-# pages.py
-
 def page_my_settings():
     st.header("My Settings")
 
@@ -361,10 +420,7 @@ def _render_change_password():
     confirm_pass = st.text_input("Confirm New Password", type="password")
 
     if st.button("Update Password"):
-        # ... do your re-auth check, then update_instructor_password logic ...
-        # e.g.:
-        from instructors_db import list_instructors, authenticate_instructor, update_instructor_password
-        
+        # ... do your re-auth check, then update_instructor_password logic ...        
         # Find username from session
         username = None
         all_instr = list_instructors()
@@ -955,416 +1011,6 @@ def page_help():
     </div>
     """, unsafe_allow_html=True)
 
-# def page_help():
-#     """
-#     A comprehensive "Help / User Guide" page that explains how to use the 
-#     Club Stride Attendance System. It references major workflows found 
-#     elsewhere in the code: logging in, managing students, taking attendance, 
-#     schedules, instructors, reports, etc.
-#     """
-#     st.header("📚 Help & User Guide")
-    
-#     st.markdown("""
-#     <div style="padding: 15px; border-radius: 5px; border-left: 5px solid #4682B4; background-color: #f8f9fa;">
-#     <h3 style="color: #4682B4;">Welcome to the Club Stride Attendance System</h3>
-#     <p>This guide will help you navigate and use all features of the system effectively. 
-#     Select any topic below to learn more about that feature.</p>
-#     </div>
-#     """, unsafe_allow_html=True)
-    
-#     st.markdown("### 📋 Guide Contents")
-    
-#     # Create a table of contents with icons
-#     st.markdown("""
-#     | Section | Description |
-#     | ------- | ----------- |
-#     | 🔑 [Login](#login) | How to access the system as an Admin or Instructor |
-#     | 📊 [Dashboard](#dashboard) | Navigating the main dashboard and viewing metrics |
-#     | 👨‍🎓 [Students](#students) | Adding, editing, and managing student records |
-#     | 📝 [Attendance](#attendance) | Recording daily attendance and past sessions |
-#     | 📋 [Review](#review) | Reviewing past attendance and identifying missed sessions |
-#     | 📅 [Schedules](#schedules) | Creating and managing class schedules |
-#     | 📈 [Reports](#reports) | Generating attendance reports and analysis |
-#     | 🔒 [Password](#password) | Changing your login credentials |
-#     | 👨‍🏫 [Instructors](#instructors) | Managing instructor accounts (Admin only) |
-#     | 🚪 [Logout](#logout) | Securely exiting the system |
-#     """)
-    
-#     st.write("---")
-
-#     # 1) Logging In
-#     st.markdown('<a name="login"></a>', unsafe_allow_html=True)
-#     with st.expander("🔑 Logging In (Admin or Instructor)"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">🔐</h1>
-#                 <p><strong>System Access</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Admin Login
-#             1. From the sidebar, select **Login**
-#             2. Choose the radio option **Admin**
-#             3. Enter your MongoDB connection string
-#             4. If valid, you'll see "Admin access granted"
-            
-#             ### Instructor Login
-#             1. From the sidebar, select **Login**
-#             2. Choose the radio option **Instructor**
-#             3. Enter your **Username** and **Password**
-#             4. If correct, you'll see "Welcome, [username]!" and be redirected to the Dashboard
-#             """)
-            
-#         st.info("💡 **Tip**: Only Administrators can create instructor accounts or assign programs.")
-
-#     # 2) Navigating the Dashboard
-#     st.markdown('<a name="dashboard"></a>', unsafe_allow_html=True)
-#     with st.expander("📊 Navigating the Dashboard"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">📈</h1>
-#                 <p><strong>Key Metrics</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Dashboard Overview
-#             After logging in, click on **Dashboard** in the sidebar menu to see:
-            
-#             - **This Week's Attendance** - Total attendance records for the current week
-#             - **Absences** - Number of absence records in the current week
-#             - **At-Risk Students** - Students with excessive absences (≥ 2 absences)
-#             - **Attendance Distribution** - Chart showing attendance patterns in the last 7 days
-            
-#             The Dashboard provides a quick overview of critical attendance statistics without replacing the detailed reporting features.
-#             """)
-
-#     # 3) Managing Students
-#     st.markdown('<a name="students"></a>', unsafe_allow_html=True)
-#     with st.expander("👨‍🎓 Managing Students"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">👩‍🎓</h1>
-#                 <p><strong>Student Records</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Viewing & Managing Students
-#             1. Go to **Student Management Suite** → **Manage Students**
-#             2. You'll see a list of current students with these actions:
-#                - **Edit** ✏️ - Update student information
-#                - **Delete** 🗑️ - Remove the student from the database
-#                - **Mark Attendance** ✅ - Record today's attendance
-#                - **Mark Past** 📆 - Record attendance for a previous date
-            
-#             ### Adding New Students
-#             Click the **Add or Update Students** tab to create new records:
-            
-#             #### Single Student Entry
-#             Fill out the form with name, contact info, program, etc.
-            
-#             #### Bulk CSV Upload
-#             1. Prepare a CSV with these columns:
-#                - First Name, Last Name, Number, Email, Grade, School
-#             2. Select the Program for these students
-#             3. Upload your CSV file
-#             4. Review and process the data
-#             """)
-            
-#         st.warning("⚠️ **Note**: Instructors will only see students from programs assigned to them.")
-
-#     # 4) Taking Attendance
-#     st.markdown('<a name="attendance"></a>', unsafe_allow_html=True)
-#     with st.expander("📝 Taking Attendance"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">📋</h1>
-#                 <p><strong>Daily Records</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Recording Today's Attendance
-#             1. Go to **Student Management Suite** → **Attendance & Scheduling** → **Take Attendance**
-#             2. Select the program (Admin) or view your assigned programs (Instructor)
-#             3. For each student, select their status:
-#                - ✅ **Present** - Student attended class
-#                - 🕒 **Late** - Student arrived late
-#                - ❌ **Absent** - Student did not attend
-#                - 🤝 **Excused** (if available) - Absence with valid reason
-#             4. Add any comments as needed
-#             5. Click **Submit Attendance**
-            
-#             ### Recording Past Attendance
-#             1. Select the **Past Session** tab
-#             2. Choose the date and time of the session
-#             3. Mark each student's status and add comments
-#             4. Click **Submit Past Attendance**
-#             """)
-            
-#         st.info("💡 **Tip**: You can use the Quick Select options to mark all students as Present or Absent at once.")
-#         st.warning("⚠️ **Duplicate Check**: If you've already recorded attendance for the same day, the system will show a warning.")
-
-#     # 5) Reviewing Attendance & Missed Counts
-#     st.markdown('<a name="review"></a>', unsafe_allow_html=True)
-#     with st.expander("📋 Reviewing Attendance & Missed Counts"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">🔍</h1>
-#                 <p><strong>Review Records</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Attendance Records
-#             1. Go to **Student Management Suite** → **Attendance & Scheduling** → **Review Attendance**
-#             2. View summary metrics:
-#                - Attendance This Week
-#                - Absences This Week
-#                - Active Students
-#             3. The **All Attendance Records** tab shows a complete attendance history
-#                - Filter by Program or Student Name
-#                - Sort records by date, student, or status
-#                - Edit or delete individual records
-            
-#             ### Missed Sessions
-#             The **Missed Sessions** tab shows absence patterns:
-#             - See which students have the most absences
-#             - Identify attendance trends
-#             - Highlight students who may need intervention
-#             """)
-            
-#         st.success("✅ **Pro Tip**: Use filters to focus on specific programs or students when reviewing records.")
-
-#     # 6) Managing Schedules
-#     st.markdown('<a name="schedules"></a>', unsafe_allow_html=True)
-#     with st.expander("📅 Managing Schedules"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">🗓️</h1>
-#                 <p><strong>Class Schedules</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Creating New Schedules
-#             1. Navigate to **Student Management Suite** → **Attendance & Scheduling** → **Manage Schedules**
-#             2. Click **Create a New Schedule**
-#             3. Enter the Title and select a Program
-#             4. Choose a Recurrence Pattern:
-#                - **One-Time** - Single class session on a specific date
-#                - **Weekly** - Regular sessions on certain days each week
-#             5. For One-Time sessions:
-#                - Select the date, start time, end time, and location
-#             6. For Weekly sessions:
-#                - Select which days of the week (Mon, Tue, Wed, etc.)
-#                - Set start time, end time, and location for each day
-            
-#             ### Managing Existing Schedules
-#             - View all schedules for your assigned programs
-#             - Edit any schedule you created (or any schedule if you're an Admin)
-#             - Delete schedules that are no longer needed
-#             """)
-            
-#         st.info("💡 **Notification**: The system can email students in the associated program about new or changed schedules.")
-
-#     # 7) Generating Reports
-#     st.markdown('<a name="reports"></a>', unsafe_allow_html=True)
-#     with st.expander("📈 Generating Reports"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">📊</h1>
-#                 <p><strong>Data Analysis</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Visualizations
-#             1. Go to **Student Management Suite** → **Generate Reports**
-#             2. The **Visualizations** tab shows:
-#                - Overall attendance rates
-#                - Present/absent percentages
-#                - Program rankings
-#                - Attendance trends over time
-            
-#             ### Data Explorer
-#             The **Data Explorer** tab lets you:
-#             - Filter data by various criteria
-#             - Create custom visualizations
-#             - Export filtered data as CSV
-            
-#             ### Report Generator
-#             The **Generate Reports** tab allows you to:
-#             1. Select a specific program
-#             2. Generate a pivot table showing attendance by student and date
-#             3. Identify students with excessive absences
-#             4. Download a complete Excel report with summary statistics
-#             """)
-            
-#         st.success("✅ **Pro Tip**: Regular reporting helps identify attendance patterns early and enables timely interventions for at-risk students.")
-
-#     # 8) Changing Your Password
-#     st.markdown('<a name="password"></a>', unsafe_allow_html=True)
-#     with st.expander("🔒 Changing Your Password (Instructors)"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">🔑</h1>
-#                 <p><strong>Account Security</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Password Management
-#             1. If you're logged in as an Instructor, click **Change My Password** in the sidebar
-#             2. Enter your current password
-#             3. Enter your new password twice (for confirmation)
-#             4. Click **Update Password**
-            
-#             The system will verify your current password and then securely update your credentials.
-#             """)
-            
-#         st.warning("⚠️ **Security Tip**: Choose a strong password with at least 8 characters, including numbers, letters, and special characters.")
-
-#     # 9) Managing Instructors (Admin Only)
-#     st.markdown('<a name="instructors"></a>', unsafe_allow_html=True)
-#     with st.expander("👨‍🏫 Managing Instructors (Admin Only)"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">👩‍🏫</h1>
-#                 <p><strong>Staff Management</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Instructor Management (Admins Only)
-#             1. Log in as an Admin
-#             2. Click **Manage Instructors** in the sidebar
-#             3. From this page, you can:
-            
-#             #### Create New Instructors
-#             - Set username, password, and role (Instructor, Manager, or Admin)
-            
-#             #### Manage Existing Instructors
-#             - Edit roles and permissions
-#             - Reset passwords
-#             - Delete instructor accounts
-            
-#             #### Program Assignment
-#             - Link instructors to specific programs
-#             - Determine which students and attendance data they can access
-#             """)
-            
-#         st.error("⛔ **Warning**: Deleting instructors or programs cannot be easily undone. Proceed with caution.")
-
-#     # 10) Logging Out
-#     st.markdown('<a name="logout"></a>', unsafe_allow_html=True)
-#     with st.expander("🚪 Logging Out"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">🔓</h1>
-#                 <p><strong>Exit System</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### Secure Logout
-#             1. Click the **Logout** button in the sidebar menu
-#             2. The system will clear your session data including:
-#                - Your user role
-#                - Assigned programs
-#                - Authentication status
-#             3. You'll be returned to the Home screen
-            
-#             Always log out when you're finished using the system, especially on shared computers.
-#             """)
-            
-#         st.info("💡 **Security Tip**: For maximum security, close your browser after logging out.")
-
-#     # 11) Additional Admin Tools (Optional)
-#     with st.expander("🛠️ Additional Admin Tools"):
-#         col1, col2 = st.columns([1, 3])
-        
-#         with col1:
-#             st.markdown("""
-#             <div style="text-align: center;">
-#                 <h1 style="font-size: 48px; color: #4682B4;">⚙️</h1>
-#                 <p><strong>Advanced Options</strong></p>
-#             </div>
-#             """, unsafe_allow_html=True)
-            
-#         with col2:
-#             st.markdown("""
-#             ### MongoDB Connection
-#             - When logging in as Admin, you provide the connection string for the database
-#             - This connection enables all Admin-level operations
-            
-#             ### Program Management
-#             - Create new programs for different classes or locations
-#             - Delete programs that are no longer active
-#             - Reassign programs between instructors
-            
-#             ### Data Administration
-#             - Monitor system usage and performance
-#             - Perform database maintenance tasks
-#             - Manage backups and data integrity
-#             """)
-            
-#         st.error("⛔ **Warning**: Advanced admin tools should only be used by users with proper training and authorization.")
-
-#     st.write("---")
-    
-#     # Contact Information and Footer
-#     st.markdown("""
-#     <div style="padding: 15px; border-radius: 5px; background-color: #f8f9fa; text-align: center;">
-#     <h3>Need Additional Help?</h3>
-#     <p>If you have any questions or need assistance, please contact:</p>
-#     <p><strong>✉️ Email:</strong> javier@clubstride.org</p>
-#     <p><em>Club Stride Attendance System • Version 1.0</em></p>
-#     </div>
-#     """, unsafe_allow_html=True)
-
 def page_unified_login():
     st.header("🔑 Login")
     
@@ -1653,14 +1299,22 @@ def page_manage_instructors():
             with st.form("add_instructor_form"):
                 uname = st.text_input("Username")
                 pwd = st.text_input("Password", type="password")
+                email = st.text_input("Email Address", help="Email for notifications")
+
                 role = st.selectbox("Role", ["Instructor", "Manager", "Admin"])
                 submitted = st.form_submit_button("Create Instructor")
 
             if submitted:
                 success = add_instructor(uname, pwd, role)
                 if success:
-                    st.success("Instructor created successfully!")
-                    st.rerun()
+                    if email.strip():
+                        instructors = list_instructors()
+                        for instr in instructors:
+                            if instr["username"] == uname:
+                                update_instructor_email(instr["instructor_id"], email)
+                                break
+                        st.success("Instructor created successfully!")
+                        st.rerun()
                 else:
                     st.error("User might already exist or an error occurred.")
 
@@ -1709,6 +1363,19 @@ def page_manage_instructors():
 
             st.write("---")
 
+            st.write("### Email Address")
+            current_email = get_instructor_email(instr_id)
+            new_email = st.text_input(
+                "Email Address", 
+                value=current_email,
+                key=f"email_{instr_id}",
+                help="Email for program assignment notifications"
+            )
+            if st.button("Update Email", key=f"btn_email_{instr_id}"):
+                if update_instructor_email(instr_id, new_email):
+                    st.success(f"Email updated for {username}")
+                else:
+                    st.error("Failed to update email")
             # (3) Assigned Programs
             st.write("### Assigned Programs")
             assigned = list_instructor_programs(instr_id)
@@ -1757,7 +1424,6 @@ def page_manage_instructors():
                     st.success(f"Assigned Program {prog_dict[choice]} (ID={choice}) to {username}")
                     st.rerun()
 
-
 #####################
 # PAGE: Instructor Password Change
 #####################
@@ -1801,9 +1467,6 @@ def page_instructor_change_password():
 #####################
 # PAGE: Manage Students (MongoDB)
 #####################
-import streamlit as st
-import pandas as pd
-from datetime import date, time, datetime
 
 def page_manage_students():
     # Initialize edit state if not already done
@@ -2156,113 +1819,10 @@ def page_manage_students():
                         mode = st.session_state.get("attendance_mode", "today")
 
                         if mode == "today":
-                            with st.form("today_attendance_form"):
-                                st.write(f"**Recording attendance for: {single_stud['name']}**")
-                                current_dt = datetime.now()
-                                st.write(f"Date: {current_dt.strftime('%Y-%m-%d')}")
-                                st.write(f"Time: {current_dt.strftime('%H:%M')}")
-
-                                status_opt = ["Present", "Late", "Absent", "Excused"]
-                                status_icons = ["✅", "🕒", "❌", "🔖"]
-                                status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opt)]
-
-                                selected_status_idx = st.selectbox(
-                                    "Status:",
-                                    options=range(len(status_opt)),
-                                    format_func=lambda i: status_options_with_icons[i],
-                                    index=0
-                                )
-                                chosen_status = status_opt[selected_status_idx]
-
-                                comment_txt = st.text_area("Comment (Optional)", height=100)
-
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    cancel_btn = st.form_submit_button("Cancel")
-
-                                with col2:
-                                    submit_btn = st.form_submit_button("Submit Attendance")
-
-                                if submit_btn:
-                                    with st.spinner("Recording attendance..."):
-                                        try:
-                                            msg = record_student_attendance_in_array(
-                                                name=single_stud["name"],
-                                                program_id=single_stud["program_id"],
-                                                status=chosen_status,
-                                                comment=comment_txt,
-                                                attendance_date=current_dt
-                                            )
-                                            st.success(f"✅ Marked {single_stud['name']} as {chosen_status}. {msg}")
-                                        except Exception as e:
-                                            st.error(f"❌ Error: {e}")
-
-                                        st.session_state.pop("attendance_student", None)
-                                        st.session_state.pop("attendance_mode", None)
-                                        st.rerun()
-
-                                if cancel_btn:
-                                    st.session_state.pop("attendance_student", None)
-                                    st.session_state.pop("attendance_mode", None)
-                                    st.info("ℹ️ Individual attendance marking canceled.")
-                                    st.rerun()
-
+                            handle_mark_attendance_today(single_stud)
+                            
                         elif mode == "past":
-                            with st.form("past_attendance_form_students"):
-                                st.write(f"**Recording past attendance for: {single_stud['name']}**")
-
-                                date_val = st.date_input("Session Date", value=date.today())
-                                time_val = st.time_input("Session Time", value=time(9, 0))
-                                combined_dt = datetime.combine(date_val, time_val)
-
-                                status_opt = ["Present", "Late", "Absent", "Excused"]
-                                status_icons = ["✅", "🕒", "❌", "🔖"]
-                                status_options_with_icons = [f"{icon} {status}" for icon, status in zip(status_icons, status_opt)]
-
-                                selected_status_idx = st.selectbox(
-                                    "Status:",
-                                    options=range(len(status_opt)),
-                                    format_func=lambda i: status_options_with_icons[i],
-                                    index=0
-                                )
-                                chosen_status = status_opt[selected_status_idx]
-
-                                comment_txt = st.text_area("Comment (Optional)", height=100)
-
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    cancel_btn = st.form_submit_button("Cancel")
-
-                                with col2:
-                                    submit_btn = st.form_submit_button("Submit Past Attendance")
-
-                                if submit_btn:
-                                    with st.spinner("Recording past attendance..."):
-                                        try:
-                                            msg = record_student_attendance_in_array(
-                                                name=single_stud["name"],
-                                                program_id=single_stud["program_id"],
-                                                status=chosen_status,
-                                                comment=comment_txt,
-                                                attendance_date=combined_dt
-                                            )
-                                            st.success(
-                                                f"✅ Marked {single_stud['name']} as {chosen_status} on "
-                                                f"{combined_dt.strftime('%Y-%m-%d %H:%M')}. {msg}"
-                                            )
-                                        except Exception as e:
-                                            st.error(f"❌ Error: {e}")
-
-                                        st.session_state.pop("attendance_student", None)
-                                        st.session_state.pop("attendance_mode", None)
-                                        st.rerun()
-
-                                if cancel_btn:
-                                    st.session_state.pop("attendance_student", None)
-                                    st.session_state.pop("attendance_mode", None)
-                                    st.info("ℹ️ Past attendance marking canceled.")
-                                    st.rerun()
-            # End if students
+                            handle_mark_attendance_past(single_stud)
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # TAB 2: ADD OR UPDATE STUDENTS (Single or Bulk)
@@ -3318,15 +2878,17 @@ def show_attendance_logs():
                         cancel_btn = st.form_submit_button("Cancel")
                     with c2:
                         save_btn = st.form_submit_button("Save Changes")
-
+                    
                     if save_btn:
                         with st.spinner("Updating attendance record..."):
                             success = upsert_attendance_subdoc(
                                 student_id=st.session_state["edit_student_id"],
                                 target_date=combined_dt,
                                 new_status=new_status,
-                                new_comment=new_comment
+                                new_comment=new_comment,
+                                old_date=old_date_parsed if 'old_date_parsed' in locals() else None
                             )
+                    
                             if success:
                                 st.success("✅ Attendance updated successfully.")
 
@@ -3343,9 +2905,17 @@ def show_attendance_logs():
                                             old_date_str
                                         )
 
-                                # Reset everything so we fetch fresh data
+                               
+                                if "selected_prog_id" in st.session_state:
+                                    current_program = st.session_state["selected_prog_id"]
+                                if "selected_student" in st.session_state:  
+                                    current_student = st.session_state["selected_student"]
+
+                                # Clear attendance data to force refresh
                                 st.session_state["attendance_records"] = None
                                 st.session_state["edit_record_key"] = None
+
+                                # Rerun with stored filters
                                 st.rerun()
                             else:
                                 st.error("❌ Failed to update attendance record.")
@@ -3502,10 +3072,6 @@ def show_last_week_attendance():
 
             st.session_state.pop("editing_attendance")
             st.rerun()
-
-
-
-
 
 #####################
 # PAGE: Manage Schedules
@@ -3908,7 +3474,6 @@ def page_manage_schedules():
                 st.write("---")
                 
                 # Time and location fields based on recurrence type
-                from dateutil import parser
                 if new_recurrence == "None":
                     st.subheader("📆 One-Time Session Details")
                     
@@ -4114,10 +3679,6 @@ def page_manage_schedules():
         if idx < len(schedules_for_programs) - 1:
             st.write("---")
             
-#####################
-# PAGE: Generate Reports with Pygwalker
-#####################
-
 
 def highlight_high_absences(row):
     """
@@ -4207,7 +3768,7 @@ def page_generate_reports():
     st.success(f"✅ Loaded attendance data for {len(df['name'].unique())} students across {len(df['program_id'].unique())} programs.")
     
     # Create tabs for better organization
-    tab1, tab2, tab3 = st.tabs(["📈 Visualizations", "🔍 Data Explorer", "📑 Generate Reports"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Visualizations", "🔍 Data Explorer", "📑 Generate Reports", "🔄 Impact Assessment"])
     
     with tab1:
         # -------------------------------------------------------------------------
@@ -4558,6 +4119,11 @@ def page_generate_reports():
                     return sum(x in ["Absent", "Missed"] for x in row)
                 pivot_df["Total Absences"] = pivot_df.apply(count_absences, axis=1)
                 
+                date_columns = [col for col in pivot_df.columns if col != "Total Absences"]
+                # Create new column order with "Total Absences" as the second column
+                new_column_order = ["Total Absences", date_columns[0]] + date_columns[1:]
+                # Reindex the DataFrame with the new column order
+                pivot_df = pivot_df[new_column_order]
                 st.session_state["pivot_df"] = pivot_df
                 
                 # Success message after report generation
@@ -4665,5 +4231,3495 @@ def page_generate_reports():
                             )
                             
                             st.success("✅ Excel file created successfully!")
+    with tab4:
+        st.subheader("🔄 Nonprofit Program Impact Assessment")
+        st.write("Generate professional impact assessment reports for your nonprofit programs and initiatives.")
+        
+        # Get the prompts dictionary
+        prompts_dict = get_nonprofit_prompts()
+        
+        # Create the input area
+        if 'nonprofit_project_description' not in st.session_state:
+            default_text = """
+            Describe your program's primary objectives, the communities served, and intended impact areas.
+            Example: "Our youth mentorship program aims to improve academic outcomes and life skills for underserved high school students in our community through weekly mentoring sessions, workshops, and college preparation assistance."
+            """
+            st.session_state['nonprofit_project_description'] = default_text
 
+        project_description = st.text_area(
+            "Provide a brief overview of your program:",
+            value=st.session_state['nonprofit_project_description'],
+            height=120,
+            max_chars=500,
+            help="Describe your program's objectives, target participants, and desired outcomes"
+        )
+        
+        # Analysis method selection
+        st.write("### Choose an Impact Measurement Approach:")
+        
+        selected_approach = st.radio(
+            "Select the most relevant analysis method:",
+            options=list(prompts_dict.keys()),
+            horizontal=False,
+            help="Each approach focuses on different aspects of nonprofit impact measurement"
+        )
+        
+        # Display the explanation for the selected approach
+        with st.expander("Understanding this approach", expanded=True):
+            st.info(prompts_dict[selected_approach])
+        
+        # Generate report button
+        if st.button("🔄 Generate Impact Assessment Report", use_container_width=True):
+            if project_description.strip() == "" or project_description == st.session_state['nonprofit_project_description']:
+                st.warning("Please provide a description of your specific program before generating a report.")
+            else:
+                st.session_state['nonprofit_project_description'] = project_description
+                
+                with st.spinner("Generating your impact assessment report..."):
+                    report_content = generate_ai_enhanced_report(project_description, selected_approach)
+                    
+                    if report_content:
+                        st.success("✅ Impact assessment report generated successfully!")
+                        
+                        # Display the generated report in a nice format
+                        st.markdown("### 📋 Program Impact Assessment Report")
+                        st.markdown(f"**Analysis Method:** {selected_approach}")
+                        
+                        with st.expander("View Full Report", expanded=True):
+                            st.markdown(report_content)
+                        
+                        # Create download options
+                        # 1. Plain text
+                        st.download_button(
+                            label="📄 Download as Text",
+                            data=report_content,
+                            file_name=f"impact_assessment_{selected_approach.split()[0].lower()}.txt",
+                            mime="text/plain"
+                        )
+                        
+                        # 2. Create formatted PDF content
+                        pdf_content = f"""# Program Impact Assessment Report
+                        ## Analysis Method: {selected_approach}
+
+                        {report_content}
+
+                        ---
+                        Generated by Club Stride Impact Assessment Tool
+                        Date: {datetime.now().strftime('%Y-%m-%d')}
+                            """
+                                                    
+
+
+def display_document_sending_form(is_admin):
+    """Display the form for sending a document to recipients."""
+    st.subheader("📤 Send Document")
+    
+    # In the document sending UI section - now with improved URL handling
+    with st.form("send_document_form"):
+        st.subheader(f"Send Document: {st.session_state.get('selected_document_title', '')}")
+        
+        # Get recipient information
+        recipient_type = st.selectbox(
+            "Recipient Type", 
+            ["Student", "Instructor", "Parent", "Other"]
+        )
+        
+        # Dynamically load recipients based on type
+        if recipient_type == "Student":
+            # For students, load from your database
+            students = get_all_students()
+            if not students:
+                st.warning("No students found in the database.")
+                st.stop()
+                
+            student_options = [(s["student_id"], s["name"]) for s in students]
+            
+            selected_student_id = st.selectbox(
+                "Select Student",
+                options=[so[0] for so in student_options],
+                format_func=lambda sid: next((s[1] for s in student_options if s[0] == sid), "Unknown")
+            )
+            
+            # Get the selected student's details
+            selected_student = next((s for s in students if s["student_id"] == selected_student_id), None)
+            if selected_student:
+                recipient_id = selected_student_id
+                recipient_name = selected_student["name"]
+                recipient_email = selected_student.get("contact_email", "")
+                
+                # Show email and allow editing
+                recipient_email = st.text_input("Recipient Email", value=recipient_email)
+        
+        elif recipient_type == "Instructor":
+            # For instructors, load from your database
+            instructors = list_instructors()
+            if not instructors:
+                st.warning("No instructors found in the database.")
+                st.stop()
+                
+            instructor_options = [(i["instructor_id"], i["username"]) for i in instructors]
+            
+            selected_instructor_id = st.selectbox(
+                "Select Instructor",
+                options=[io[0] for io in instructor_options],
+                format_func=lambda iid: next((i[1] for i in instructor_options if i[0] == iid), "Unknown")
+            )
+            
+            recipient_id = selected_instructor_id
+            recipient_name = next((i[1] for i in instructor_options if i[0] == selected_instructor_id), "Unknown")
+            recipient_email = st.text_input("Recipient Email", value="")
+        
+        else:
+            # For other types, allow manual entry
+            recipient_id = "manual"
+            recipient_name = st.text_input("Recipient Name")
+            recipient_email = st.text_input("Recipient Email")
+        
+        # URL Configuration Section with visual separation
+        st.markdown("---")
+        st.markdown("### 🌐 Document Access Configuration")
+        
+        # Add base URL input field with default value and more prominent display
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            default_base_url = st.session_state.get("base_url", "https://clubstride.org")
+            base_url = st.text_input(
+                "Base URL for Document Link",
+                value=default_base_url,
+                help="The complete domain for document signing links (e.g., https://clubstride.org)"
+            )
+        
+        with col2:
+            # Display URL format information
+            st.write("URL format will be verified on submission")
+        
+        # Additional URL options
+        url_expiration = st.slider(
+            "Link Expiration (days)",
+            min_value=1,
+            max_value=90,
+            value=30,
+            help="How many days until the signing link expires"
+        )
+        
+        # Store base URL in session for future use
+        if base_url != default_base_url:
+            st.session_state["base_url"] = base_url
+        
+        # Email customization option
+        customize_email = st.checkbox("Customize Email Message", value=False)
+        if customize_email:
+            email_subject = st.text_input(
+                "Email Subject", 
+                value=f"Please sign: {st.session_state.get('selected_document_title', 'Document')}"
+            )
+            email_message = st.text_area(
+                "Additional Message",
+                value="",
+                placeholder="Enter any additional text you'd like to include in the email...",
+                height=100
+            )
+        else:
+            email_subject = f"Please sign: {st.session_state.get('selected_document_title', 'Document')}"
+            email_message = ""
+        
+        # Option to override duplicate check
+        skip_duplicate_check = False
+        if is_admin:
+            skip_duplicate_check = st.checkbox(
+                "Skip duplicate check", 
+                value=False,
+                help="Send document even if recipient has already received it"
+            )
+            
+        # Submit button
+        submit_send = st.form_submit_button("Send Document")
+    
+    # Process form submission (outside the form)
+    if submit_send:
+        # Validate inputs
+        if not base_url.startswith(("http://", "https://")):
+            st.warning("URL should start with http:// or https://")
+        elif not recipient_email:
+            st.error("Recipient email is required.")
+        elif not recipient_name:
+            st.error("Recipient name is required.")
+        elif not base_url:
+            st.error("Base URL is required for document access.")
+        else:
+            with st.spinner("Checking for duplicates and sending document..."):
+                document_id = st.session_state.get("selected_document_id")
+                
+                # Check for duplicate document instances
+                if not skip_duplicate_check and check_document_instance_exists(document_id, recipient_email):
+                    st.warning(f"⚠️ This document has already been sent to {recipient_email}.")
+                    
+                    # Ask if user wants to send anyway
+                    if st.button("Send anyway"):
+                        # Proceed with sending
+                        skip_duplicate_check = True
+                    else:
+                        # Stop here
+                        return
+                
+                # Create document instance with expiration based on slider
+                instance_id = create_document_instance(
+                    document_id=document_id,
+                    recipient_id=recipient_id,
+                    recipient_type=recipient_type.lower(),
+                    recipient_name=recipient_name,
+                    recipient_email=recipient_email,
+                    expiration_days=url_expiration
+                )
+                
+                if instance_id:
+                    # Send the document with the specified base URL and custom message if provided
+                    success = send_document(
+                        instance_id=instance_id, 
+                        base_url=base_url,
+                        email_subject=email_subject,
+                        email_message=email_message
+                    )
+                    
+                    if success:
+                        st.success(f"✅ Document sent successfully to {recipient_name}!")
+                        
+                        # Show link details for reference
+                        st.info(f"A unique signing link was sent to {recipient_email}. The link will expire in {url_expiration} days.")
+                        
+                        # Options for next actions
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("Send to Another Recipient"):
+                                st.session_state["sending_to_another"] = True
+                                st.rerun()
+                        
+                        with col2:
+                            if st.button("Return to Documents"):
+                                st.session_state.pop("selected_document_id", None)
+                                st.session_state.pop("selected_document_title", None)
+                                st.rerun()
+                    else:
+                        st.error("Failed to send document. Please check email configuration and try again.")
+                else:
+                    st.error("Failed to create document instance. Please try again.")
+                    
+def display_document_tracking():
+    """Display the document tracking interface in the Track Documents tab."""
+    st.subheader("Document Tracking")
+    
+    # 1. Search interface
+    st.write("### 🔍 Search Documents by Recipient")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        search_term = st.text_input(
+            "Search by recipient name or email:",
+            help="Enter a name or email to find documents sent to specific recipients"
+        )
+    
+    with col2:
+        st.write("")
+        st.write("")
+        search_button = st.button("🔍 Search", use_container_width=True)
+    
+    # Display results when search is performed
+    if search_term or search_button:
+        if not search_term:
+            st.warning("⚠️ Please enter a search term.")
+        else:
+            with st.spinner(f"Searching for documents sent to '{search_term}'..."):
+                results = search_documents_by_recipient(search_term)
+                
+                if not results:
+                    st.info(f"📌 No documents found for '{search_term}'.")
+                else:
+                    st.success(f"Found {len(results)} document(s) sent to recipients matching '{search_term}'.")
+                    
+                    # Display the results in a nice format
+                    for idx, item in enumerate(results):
+                        instance = item["instance"]
+                        document = item["document"]
+                        
+                        with st.expander(f"**{document.get('title', 'Untitled')}** - sent to {instance.get('recipient_name', 'Unknown')}"):
+                            col_info, col_status = st.columns([2, 1])
+                            
+                            with col_info:
+                                st.markdown(f"**Document:** {document.get('title', 'Untitled')}")
+                                st.markdown(f"**Type:** {document.get('document_type', 'Unknown').replace('_', ' ').title()}")
+                                st.markdown(f"**Recipient:** {instance.get('recipient_name', 'Unknown')}")
+                                st.markdown(f"**Email:** {instance.get('recipient_email', 'Unknown')}")
+                                
+                                # Display dates if available
+                                if instance.get("sent_at_formatted"):
+                                    st.markdown(f"**Sent:** {instance.get('sent_at_formatted')}")
+                                if instance.get("viewed_at_formatted"):
+                                    st.markdown(f"**Viewed:** {instance.get('viewed_at_formatted')}")
+                                if instance.get("signed_at_formatted"):
+                                    st.markdown(f"**Signed:** {instance.get('signed_at_formatted')}")
+                                if instance.get("expiration_date_formatted"):
+                                    st.markdown(f"**Expires:** {instance.get('expiration_date_formatted')}")
+                            
+                            with col_status:
+                                status = instance.get("status", "unknown")
+                                if status == "sent":
+                                    st.markdown("**Status:** 📤 Sent")
+                                elif status == "viewed":
+                                    st.markdown("**Status:** 👁️ Viewed")
+                                elif status == "signed":
+                                    st.markdown("**Status:** ✅ Signed")
+                                elif status == "declined":
+                                    st.markdown("**Status:** ❌ Declined")
+                                elif status == "expired":
+                                    st.markdown("**Status:** ⏱️ Expired")
+                                else:
+                                    st.markdown(f"**Status:** {status.capitalize()}")
+                                
+                                # Action buttons
+                                if status in ["sent", "viewed"]:
+                                    if st.button("📧 Send Reminder", key=f"remind_{idx}"):
+                                        if send_reminder(instance["instance_id"]):
+                                            st.success("✅ Reminder sent successfully!")
+                                        else:
+                                            st.error("❌ Failed to send reminder. Please try again.")
+                                
+                                # View document link if available
+                                # file_location = document.get("file_location")
+                                # if file_location:
+                                #     file_path = get_document_file_path(file_location)
+                                #     if file_path and os.path.exists(file_path):
+                                #         if document.get("file_type") == "application/pdf":
+                                #             with open(file_path, "rb") as f:
+                                #                 pdf_bytes = f.read()
+                                #             st.download_button(
+                                #                 label="📄 View Document",
+                                #                 data=pdf_bytes,
+                                #                 file_name=f"{document.get('title', 'document')}.pdf",
+                                #                 mime="application/pdf",
+                                #                 key=f"download_{idx}"
+                                #             )
+                                #         else:
+                                #             st.info("File preview not available.")
+                            
+                            # Activity log in an expander
+                            activity_log = instance.get("activity_log", [])
+                            if activity_log:
+                                with st.expander("View Activity Log"):
+                                    for activity in activity_log:
+                                        timestamp = activity.get("timestamp")
+                                        if timestamp and isinstance(timestamp, datetime):
+                                            timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+                                        else:
+                                            timestamp_str = str(timestamp)
+                                        
+                                        action = activity.get("action", "unknown")
+                                        details = activity.get("details", "")
+                                        
+                                        if action == "created":
+                                            st.markdown(f"**{timestamp_str}:** 🆕 Document created - {details}")
+                                        elif action == "sent":
+                                            st.markdown(f"**{timestamp_str}:** 📤 Document sent - {details}")
+                                        elif action == "viewed":
+                                            st.markdown(f"**{timestamp_str}:** 👁️ Document viewed - {details}")
+                                        elif action == "signed":
+                                            st.markdown(f"**{timestamp_str}:** ✅ Document signed - {details}")
+                                        elif action == "declined":
+                                            st.markdown(f"**{timestamp_str}:** ❌ Document declined - {details}")
+                                        elif action == "reminder_sent":
+                                            st.markdown(f"**{timestamp_str}:** 📧 Reminder sent - {details}")
+                                        else:
+                                            st.markdown(f"**{timestamp_str}:** {action.capitalize()} - {details}")
+                
+                    # Add a "Clear Results" button
+                    if st.button("🔄 Clear Results"):
+                        st.rerun()
+
+    # 2. Advanced filters section
+    with st.expander("Advanced Filters", expanded=False):
+        st.write("Filter documents by additional criteria:")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            status_filter = st.multiselect(
+                "Document Status", 
+                ["sent", "viewed", "signed", "declined", "expired"],
+                default=None,
+                help="Filter by document status"
+            )
+        
+        with col2:
+            date_range = st.date_input(
+                "Date Range",
+                value=[],
+                help="Filter by date sent"
+            )
+        
+        if st.button("Apply Filters"):
+            st.info("Advanced filtering will be implemented in a future update.")
+
+    # 3. Helpful resources
+    with st.expander("Tips for Document Tracking", expanded=False):
+        st.markdown("""
+        ### 📋 Document Tracking Tips
+        
+        - **Search by Name or Email**: Enter a recipient's name or email address to find documents sent to them
+        - **Send Reminders**: You can send reminder emails for documents that haven't been signed yet
+        - **Check Status**: See whether documents have been viewed, signed, or declined
+        - **View Activity**: Each document has an activity log showing its complete history
+        
+        Need more help? Contact the administrator for assistance.
+        """)
+
+def page_manage_documents():
+    st.header("📄 Document Management")
+    
+    # Check permissions
+    is_admin = st.session_state.get("is_admin", False)
+    instructor_id = st.session_state.get("instructor_id")
+    
+    if not (is_admin or instructor_id):
+        st.error("You must be logged in to access this page.")
+        return
+    
+    # Check if we're in document sending mode
+    if "selected_document_id" in st.session_state and not st.session_state.get("sending_to_another"):
+        # Show document sending form
+        display_document_sending_form(is_admin)
+        
+        # Add a back button at the bottom of the form
+        if st.button("← Back to Documents", key="back_from_sending"):
+            # Clear the selected document
+            st.session_state.pop("selected_document_id", None)
+            st.session_state.pop("selected_document_title", None)
+            st.rerun()
+        return  # Exit early, only show the sending form
+    
+    # Create tabs for different document functions
+    tab1, tab2, tab3 = st.tabs([
+        "📄 My Documents", 
+        "➕ Upload Document", 
+        "📊 Document Status", 
+        # "🔍 Track Documents"
+    ])
+    
+    # ------------------------------------
+    # TAB 1: View Existing Documents
+    # ------------------------------------
+
+    with tab1:
+        st.subheader("My Documents")
+        
+        # Initialize session state for delete confirmation
+        if "delete_document_id" not in st.session_state:
+            st.session_state["delete_document_id"] = None
+        
+        # Filter options
+        col1, col2 = st.columns(2)
+        with col1:
+            doc_type_filter = st.selectbox(
+                "Filter by Document Type:",
+                ["All Types", "Waiver", "Permission Slip", "Registration Form", "Other"]
+            )
+        
+        with col2:
+            status_filter = st.selectbox(
+                "Filter by Status:",
+                ["All Statuses", "Active", "Draft", "Archived"]
+            )
+        
+        # Get documents based on filters
+        query_params = {}
+        
+        # Apply owner filter (admin can see all)
+        if not is_admin:
+            query_params["owner_id"] = instructor_id
+        
+        # Apply document type filter
+        if doc_type_filter != "All Types":
+            query_params["document_type"] = doc_type_filter.lower().replace(" ", "_")
+        
+        # Apply status filter
+        if status_filter != "All Statuses":
+            query_params["status"] = status_filter.lower()
+        
+        documents = list_documents(**query_params)
+        
+        if not documents:
+            st.info("No documents found. Upload a document to get started.")
+        else:
+            # Display documents in a nice format
+            for doc in documents:
+                with st.expander(f"**{doc['title']}** ({doc['document_type']})"):
+                    col_a, col_b = st.columns([3, 1])
+                    
+                    with col_a:
+                        st.write(f"**Description:** {doc['description']}")
+                        st.write(f"**Created:** {doc['created_at'].strftime('%Y-%m-%d %H:%M')}")
+                        st.write(f"**Status:** {doc['status'].capitalize()}")
+                        
+                        # Get program name if applicable
+                        if doc.get("program_id"):
+                            program_name = "Unknown Program"
+                            for p in list_programs():
+                                if p["program_id"] == doc["program_id"]:
+                                    program_name = p["program_name"]
+                                    break
+                            st.write(f"**Program:** {program_name}")
+                    
+                    with col_b:
+                        st.write("**Actions:**")
+                        
+                        # View document button
+                        if st.button("View Document", key=f"view_{doc['document_id']}"):
+                            file_path = get_document_file_path(doc["file_location"])
+                            
+                            # For PDF files, use Streamlit's PDF display
+                            if doc["file_type"] == "application/pdf":
+                                with open(file_path, "rb") as f:
+                                    pdf_bytes = f.read()
+                                st.download_button(
+                                    label="Download PDF",
+                                    data=pdf_bytes,
+                                    file_name=f"{doc['title']}.pdf",
+                                    mime="application/pdf"
+                                )
+                            else:
+                                st.info(f"File format ({doc['file_type']}) preview not available. Please download.")
+                                with open(file_path, "rb") as f:
+                                    file_bytes = f.read()
+                                st.download_button(
+                                    label="Download File",
+                                    data=file_bytes,
+                                    file_name=os.path.basename(doc["file_location"]),
+                                    mime=doc["file_type"]
+                                )
+                        
+                        # Send document button
+                        if st.button("Send Document", key=f"send_{doc['document_id']}"):
+                            st.session_state["selected_document_id"] = doc["document_id"]
+                            st.session_state["selected_document_title"] = doc["title"]
+                            st.session_state.pop("sending_to_another", None)
+                            st.rerun()
+                        
+                        # Delete document button with confirmation
+                        if st.session_state["delete_document_id"] == doc["document_id"]:
+                            # Show confirmation dialog
+                            st.warning(f"Are you sure you want to delete '{doc['title']}'? This cannot be undone.")
+                            
+                            conf_col1, conf_col2 = st.columns(2)
+                            with conf_col1:
+                                if st.button("Cancel", key=f"cancel_delete_{doc['document_id']}"):
+                                    st.session_state["delete_document_id"] = None
+                                    st.rerun()
+                            
+                            with conf_col2:
+                                if st.button("Confirm Delete", key=f"confirm_delete_{doc['document_id']}"):
+                                    with st.spinner("Deleting document..."):
+                                        success = delete_document(doc["document_id"])
+                                        if success:
+                                            st.success(f"Document '{doc['title']}' deleted successfully.")
+                                            st.session_state["delete_document_id"] = None
+                                            st.rerun()
+                                        else:
+                                            st.error("Failed to delete document. Please try again.")
+                                            st.session_state["delete_document_id"] = None
+                        else:
+                            # Show delete button
+                            if st.button("Delete Document", key=f"delete_{doc['document_id']}"):
+                                st.session_state["delete_document_id"] = doc["document_id"]
+                                st.rerun()
+        st.write("---")
+        st.write("### 📨 Send to Program Participants")
+        st.write("Send documents to all participants in a specific program.")
+
+        # Program selection
+        program_options = list_programs()
+        if not is_admin:
+            permitted_ids = st.session_state.get("instructor_program_ids", [])
+            program_options = [p for p in program_options if p["program_id"] in permitted_ids]
+
+        if program_options:
+            # Select program
+            selected_program_id = st.selectbox(
+                "Select Program",
+                options=[p["program_id"] for p in program_options],
+                format_func=lambda pid: next((p["program_name"] for p in program_options if p["program_id"] == pid), "Unknown")
+            )
+            
+            # Select document to send
+            documents = list_documents(
+                owner_id=None if is_admin else instructor_id,
+                program_id=selected_program_id
+            )
+            
+            if documents:
+                document_id = st.selectbox(
+                    "Select Document to Send",
+                    options=[d["document_id"] for d in documents],
+                    format_func=lambda did: next((d["title"] for d in documents if d["document_id"] == did), "Unknown")
+                )
+                
+                # Option to skip duplicate check
+                skip_duplicate_check = st.checkbox(
+                    "Skip duplicate check", 
+                    value=False,
+                    help="Send to all participants even if they've already received this document"
+                )
+                
+                # Confirmation button
+                if st.button("Send to All Program Participants"):
+                    # Get all students in the program
+                    students = get_all_students(program_ids=[selected_program_id])
+                    
+                    if students:
+                        with st.spinner(f"Sending document to {len(students)} participants..."):
+                            success_count = 0
+                            skipped_count = 0
+                            failed_count = 0
+                            
+                            # Progress bar
+                            progress_bar = st.progress(0)
+                            status_text = st.empty()
+                            
+                            for i, student in enumerate(students):
+                                # Update progress
+                                progress = int((i + 1) / len(students) * 100)
+                                progress_bar.progress(progress)
+                                status_text.text(f"Processing {i+1} of {len(students)} participants...")
+                                
+                                # Check if student has an email
+                                if student.get("contact_email"):
+                                    # Check if this student already has this document
+                                    if not skip_duplicate_check and check_document_instance_exists(document_id, student["contact_email"]):
+                                        skipped_count += 1
+                                        continue
+                                        
+                                    # Create document instance for this student
+                                    instance_id = create_document_instance(
+                                        document_id=document_id,
+                                        recipient_id=student["student_id"],
+                                        recipient_type="student",
+                                        recipient_name=student["name"],
+                                        recipient_email=student["contact_email"],
+                                        expiration_days=30  # Default 30 days
+                                    )
+                                    
+                                    if instance_id:
+                                        # Send the document
+                                        if send_document(instance_id):
+                                            success_count += 1
+                                        else:
+                                            failed_count += 1
+                                    else:
+                                        failed_count += 1
+                                else:
+                                    # Student has no email
+                                    failed_count += 1
+                            
+                            # Final status update
+                            progress_bar.progress(100)
+                            status_text.text("Processing complete!")
+                            
+                            # Show summary
+                            if success_count > 0:
+                                st.success(f"✅ Document sent successfully to {success_count} participants!")
+                            if skipped_count > 0:
+                                st.info(f"ℹ️ Skipped {skipped_count} participants who already received this document.")
+                            if failed_count > 0:
+                                st.warning(f"⚠️ Failed to send to {failed_count} participants (missing email or error).")
+                    else:
+                        st.warning("No participants found in this program.")
+            else:
+                st.warning("No documents available for this program.")
+        else:
+            st.warning("No programs available. Please create a program first.")
+
+    
+    # ------------------------------------
+    # TAB 2: Upload New Document
+    # -----------------------------------
+    
+    with tab2:
+        st.subheader("Add New Document")
+        
+        with st.form("upload_document_form"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                title = st.text_input("Document Title *")
+                doc_type = st.selectbox(
+                    "Document Type *",
+                    ["Waiver", "Permission Slip", "Registration Form", "Other"]
+                )
+            
+            with col2:
+                # Program selection
+                program_options = list_programs()
+                
+                # If instructor, filter to only show assigned programs
+                if not is_admin:
+                    permitted_ids = st.session_state.get("instructor_program_ids", [])
+                    program_options = [p for p in program_options if p["program_id"] in permitted_ids]
+                
+                program_choices = [(None, "No Specific Program")] + [
+                    (p["program_id"], p["program_name"]) for p in program_options
+                ]
+                
+                selected_program = st.selectbox(
+                    "Associated Program (Optional)",
+                    options=[pc[0] for pc in program_choices],
+                    format_func=lambda pid: "No Specific Program" if pid is None else next(
+                        (p[1] for p in program_choices if p[0] == pid), "Unknown"
+                    )
+                )
+                
+                is_template = st.checkbox("Save as Template", value=False, 
+                                        help="Templates can be reused for multiple recipients")
+            
+            description = st.text_area("Description", placeholder="Briefly describe this document")
+
+            document_url = st.text_input(
+                "Document URL *", 
+                placeholder="https://docs.google.com/document/d/...",
+                help="Enter the URL where this document can be accessed"
+            )
+
+            # URL validation message
+            if document_url:
+                if not (document_url.startswith("http://") or document_url.startswith("https://")):
+                    st.warning("URL should start with http:// or https://")     
+            
+            col_a, col_b = st.columns(2)
+            with col_a:
+                # Required signatures
+                required_roles = st.multiselect(
+                    "Required Signatures",
+                    ["Student", "Parent/Guardian", "Instructor", "Admin"],
+                    default=["Student"]
+                )
+            
+            with col_b:
+                # Expiration setting
+                has_expiration = st.checkbox("Document Expires", value=True)
+                if has_expiration:
+                    expiration_days = st.number_input(
+                        "Expires After (Days)",
+                        min_value=1,
+                        max_value=365,
+                        value=30
+                    )
+            
+            # Add option to skip duplicate checking (for admin use)
+            skip_duplicate_check = False
+            if is_admin:
+                skip_duplicate_check = st.checkbox("Skip Duplicate Checking", 
+                                                value=False,
+                                                help="Allow creating duplicate documents (admin only)")
+            
+            submit_btn = st.form_submit_button("Add Document")
+            
+            if submit_btn:
+                if not title or not document_url:
+                    st.error("Please provide a title and document URL.")
+                elif not (document_url.startswith("http://") or document_url.startswith("https://")):
+                    st.error("Please enter a valid URL starting with http:// or https://")
+                else:
+                    with st.spinner("Adding document..."):
+                        # Save file
+                        owner_id = instructor_id if instructor_id else "admin"
+                        owner_type = "instructor" if instructor_id else "admin"
+                        try:
+                            # Calculate expiration
+                            expiration_date = None
+                            if has_expiration:
+                                expiration_date = datetime.utcnow() + timedelta(days=expiration_days)
+                            
+                            # Format required signatures
+                            required_signatures = []
+                            for role in required_roles:
+                                required_signatures.append({
+                                    "role": role.lower().replace("/", "_"),
+                                    "name": "",
+                                    "id": ""
+                                })
+                            
+                            # Create document record with duplicate checking
+                            document_id = create_document(
+                                title=title,
+                                description=description,
+                                document_type=doc_type.lower().replace(" ", "_"),
+                                owner_id=owner_id,
+                                owner_type=owner_type,
+                                document_url=document_url,  # Pass URL instead of file info
+                                program_id=selected_program,
+                                expiration_date=expiration_date,
+                                is_template=is_template,
+                                required_signatures=required_signatures,
+                                check_duplicates=not skip_duplicate_check  # Use the admin option
+                            )
+                            
+                            if document_id == "duplicate":
+                                st.error("⚠️ A document with this title or URL already exists. Please use a different title or URL.")
+                            elif document_id:
+                                st.success(f"Document added successfully! Document ID: {document_id}")
+                                
+                                # Store document ID in session state for later use
+                                st.session_state["temp_document_id"] = document_id
+                                st.session_state["temp_document_title"] = title
+                                
+                                # NOTE: We're not asking about sending here - will handle that outside the form
+                            else:
+                                st.error("Failed to add document. Please try again.")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+                            print(e)
+
+            # Add this code OUTSIDE the form, after the form block ends
+            # This handles the "Send now" functionality
+
+            # Check if we just created a document successfully
+            if "temp_document_id" in st.session_state:
+                document_id = st.session_state["temp_document_id"]
+                document_title = st.session_state["temp_document_title"]
+                
+                # Ask if user wants to send the document now
+                send_choice = st.radio(
+                    "Would you like to send this document to recipients now?",
+                    ["Yes, send now", "No, I'll do it later"],
+                    index=1,
+                    key="send_choice_radio"
+                )
+                
+                # Handle send choice
+                if send_choice == "Yes, send now":
+                    if st.button("Continue to send"):
+                        # Prepare for sending
+                        st.session_state["selected_document_id"] = document_id
+                        st.session_state["selected_document_title"] = document_title
+                        st.session_state.pop("sending_to_another", None)
+                        st.session_state.pop("temp_document_id", None)
+                        st.session_state.pop("temp_document_title", None)
+                        st.rerun()
+                elif send_choice == "No, I'll do it later":
+                    # REPLACE THIS LINE (it's using a button inside a form):
+                    # if st.button("Return to documents list"):
+                    
+                    # WITH THIS CODE INSTEAD (outside the form):
+                    return_to_list = st.checkbox("Return to documents list", key="return_to_list_btn")
+                    if return_to_list:
+                        # Clear temporary variables
+                        st.session_state.pop("temp_document_id", None)
+                        st.session_state.pop("temp_document_title", None)
+                        st.rerun()
+            # if "temp_document_id" in st.session_state:
+            #     document_id = st.session_state["temp_document_id"]
+            #     document_title = st.session_state["temp_document_title"]
+                
+            #     # Ask if user wants to send the document now
+            #     send_choice = st.radio(
+            #         "Would you like to send this document to recipients now?",
+            #         ["Yes, send now", "No, I'll do it later"],
+            #         index=1,
+            #         key="send_choice_radio"
+            #     )
+                
+            #     # Handle send choice
+            #     if send_choice == "Yes, send now":
+            #         if st.button("Continue to send"):
+            #             # Prepare for sending
+            #             st.session_state["selected_document_id"] = document_id
+            #             st.session_state["selected_document_title"] = document_title
+            #             st.session_state.pop("sending_to_another", None)
+            #             st.session_state.pop("temp_document_id", None)
+            #             st.session_state.pop("temp_document_title", None)
+            #             st.rerun()
+            #     elif send_choice == "No, I'll do it later":
+            #         if st.button("Return to documents list"):
+            #             # Clear temporary variables
+            #             st.session_state.pop("temp_document_id", None)
+            #             st.session_state.pop("temp_document_title", None)
+            #             st.rerun()
+                            
+    # with tab2:
+    #     st.subheader("Upload New Document")
+        
+    #     with st.form("upload_document_form"):
+    #         col1, col2 = st.columns(2)
+            
+    #         with col1:
+    #             title = st.text_input("Document Title *")
+    #             doc_type = st.selectbox(
+    #                 "Document Type *",
+    #                 ["Waiver", "Permission Slip", "Registration Form", "Other"]
+    #             )
+            
+    #         with col2:
+    #             # Program selection
+    #             program_options = list_programs()
+                
+    #             # If instructor, filter to only show assigned programs
+    #             if not is_admin:
+    #                 permitted_ids = st.session_state.get("instructor_program_ids", [])
+    #                 program_options = [p for p in program_options if p["program_id"] in permitted_ids]
+                
+    #             program_choices = [(None, "No Specific Program")] + [
+    #                 (p["program_id"], p["program_name"]) for p in program_options
+    #             ]
+                
+    #             selected_program = st.selectbox(
+    #                 "Associated Program (Optional)",
+    #                 options=[pc[0] for pc in program_choices],
+    #                 format_func=lambda pid: "No Specific Program" if pid is None else next(
+    #                     (p[1] for p in program_choices if p[0] == pid), "Unknown"
+    #                 )
+    #             )
+                
+    #             is_template = st.checkbox("Save as Template", value=False, 
+    #                                      help="Templates can be reused for multiple recipients")
+            
+    #         description = st.text_area("Description", placeholder="Briefly describe this document")
+
+    #         document_url = st.text_input(
+    #         "Document URL *", 
+    #         placeholder="https://docs.google.com/document/d/...",
+    #         help="Enter the URL where this document can be accessed")
+
+    #         if document_url:
+    #             if not (document_url.startswith("http://") or document_url.startswith("https://")):
+    #                 st.warning("URL should start with http:// or https://")     
+    #         # uploaded_file = st.file_uploader(
+    #         #     "Upload Document *", 
+    #         #     type=["pdf", "doc", "docx", "txt"],
+    #         #     help="Upload the document file"
+    #         # )
+            
+    #         col_a, col_b = st.columns(2)
+    #         with col_a:
+    #             # Required signatures
+    #             required_roles = st.multiselect(
+    #                 "Required Signatures",
+    #                 ["Student", "Parent/Guardian", "Instructor", "Admin"],
+    #                 default=["Student"]
+    #             )
+            
+    #         with col_b:
+    #             # Expiration setting
+    #             has_expiration = st.checkbox("Document Expires", value=True)
+    #             if has_expiration:
+    #                 expiration_days = st.number_input(
+    #                     "Expires After (Days)",
+    #                     min_value=1,
+    #                     max_value=365,
+    #                     value=30
+    #                 )
+            
+    #         submit_btn = st.form_submit_button("Upload Document")
+            
+    #         if submit_btn:
+    #             if not title or not document_url:
+    #                 st.error("Please provide a title and document URL.")
+    #             elif not (document_url.startswith("http://") or document_url.startswith("https://")):
+    #                 st.error("Please enter a valid URL starting with http:// or https://")
+    #             else:
+    #                 with st.spinner("Adding  document..."):
+    #                     # Save file
+    #                     owner_id = instructor_id if instructor_id else "admin"
+    #                     owner_type = "instructor" if instructor_id else "admin"
+    #                     try:
+    #                     # Calculate expiration
+    #                         expiration_date = None
+    #                         if has_expiration:
+    #                             expiration_date = datetime.utcnow() + timedelta(days=expiration_days)
+                            
+    #                         # Format required signatures
+    #                         required_signatures = []
+    #                         for role in required_roles:
+    #                             required_signatures.append({
+    #                                 "role": role.lower().replace("/", "_"),
+    #                                 "name": "",
+    #                                 "id": ""
+    #                             })
+                            
+    #                         # Create document record
+    #                         document_id = create_document(
+    #                             title=title,
+    #                             description=description,
+    #                             document_type=doc_type.lower().replace(" ", "_"),
+    #                             owner_id=owner_id,
+    #                             owner_type=owner_type,
+    #                             document_url=document_url,  # Pass URL instead of file info
+    #                             program_id=selected_program,
+    #                             expiration_date=expiration_date,
+    #                             is_template=is_template,
+    #                             required_signatures=required_signatures
+    #                         )
+                            
+    #                         if document_id:
+    #                             st.success(f"Document added successfully! Document ID: {document_id}")
+                                
+    #                             # Ask if user wants to send the document now
+    #                             send_now = st.radio(
+    #                                 "Would you like to send this document to recipients now?",
+    #                                 ["Yes, send now", "No, I'll do it later"],
+    #                                 index=1
+    #                             )
+                                
+    #                             if send_now == "Yes, send now":
+    #                                 # Provide quick send option
+    #                                 st.session_state["selected_document_id"] = document_id
+    #                                 st.session_state["selected_document_title"] = title
+    #                                 st.session_state.pop("sending_to_another", None)
+    #                                 st.rerun()
+    #                         else:
+    #                             st.error("Failed to add document. Please try again.")
+    #                     except Exception as e:
+    #                         st.error(f"Error: {str(e)}")
+    #                         print(e)
+                        
+                        # try:
+                        #     # Save the file
+                        #     file_location, file_type, file_size = save_uploaded_document(
+                        #         uploaded_file, owner_id, doc_type.lower().replace(" ", "_")
+                        #     )
+                            
+                        #     # Calculate expiration
+                        #     expiration_date = None
+                        #     if has_expiration:
+                        #         expiration_date = datetime.utcnow() + timedelta(days=expiration_days)
+                            
+                        #     # Format required signatures
+                        #     required_signatures = []
+                        #     for role in required_roles:
+                        #         required_signatures.append({
+                        #             "role": role.lower().replace("/", "_"),
+                        #             "name": "",
+                        #             "id": ""
+                        #         })
+                            
+                        #     # Create document record
+                        #     document_id = create_document(
+                        #         title=title,
+                        #         description=description,
+                        #         document_type=doc_type.lower().replace(" ", "_"),
+                        #         owner_id=owner_id,
+                        #         owner_type=owner_type,
+                        #         file_location=file_location,
+                        #         file_type=file_type,
+                        #         file_size=file_size,
+                        #         program_id=selected_program,
+                        #         expiration_date=expiration_date,
+                        #         is_template=is_template,
+                        #         required_signatures=required_signatures
+                        #     )
+                            
+                        #     if document_id:
+                        #         st.success(f"Document uploaded successfully! Document ID: {document_id}")
+                                
+                        #         # Ask if user wants to send the document now
+                        #         send_now = st.radio(
+                        #             "Would you like to send this document to recipients now?",
+                        #             ["Yes, send now", "No, I'll do it later"],
+                        #             index=1
+                        #         )
+                                
+                        #         if send_now == "Yes, send now":
+                        #             # Provide quick send option
+                        #             st.session_state["selected_document_id"] = document_id
+                        #             st.session_state["selected_document_title"] = title
+                        #             st.session_state.pop("sending_to_another", None)
+                        #             st.rerun()
+                        #     else:
+                        #         st.error("Failed to upload document. Please try again.")
+                        # except Exception as e:
+                        #     st.error(f"Error: {str(e)}")
+                        #     print(e)
+    
+    # ------------------------------------
+    # TAB 3: Document Status
+    # ------------------------------------
+    with tab3:
+        st.subheader("Document Status Dashboard")
+        
+        # Get documents and instances
+        if is_admin:
+            documents = list_documents()
+        else:
+            documents = list_documents(owner_id=instructor_id)
+        
+        if not documents:
+            st.info("No documents found to track status.")
+        else:
+            # Create a status summary
+            total_documents = len(documents)
+            st.write(f"**Total Documents:** {total_documents}")
+            
+            # Select document to view status
+            doc_options = [(d["document_id"], d["title"]) for d in documents]
+            selected_doc_id = st.selectbox(
+                "Select Document to View Status",
+                options=[do[0] for do in doc_options],
+                format_func=lambda did: next((d[1] for d in doc_options if d[0] == did), "Unknown")
+            )
+            
+            # Get status counts for selected document
+            if selected_doc_id:
+                status_counts = get_document_status_counts(selected_doc_id)
+                
+                # Display counts as metrics
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Sent", status_counts.get("sent", 0))
+                with col2:
+                    st.metric("Viewed", status_counts.get("viewed", 0))
+                with col3:
+                    st.metric("Signed", status_counts.get("signed", 0))
+                with col4:
+                    st.metric("Declined", status_counts.get("declined", 0) + status_counts.get("expired", 0))
+                
+                # Option to send reminders for unsigned documents
+                st.subheader("Send Reminders")
+                
+                if st.button("Send Reminders to Unsigned Recipients"):
+                    # Implementation for sending reminders
+                    # This would use your send_reminder function
+                    st.info("Reminder functionality will be implemented here.")
+    
+    
+    # ------------------------------------
+    # TAB 4: Track Documents
+    # ------------------------------------
+    # This code should be placed inside the TAB 4 section of page_manage_documents.py
+
+    # with tab4:
+    #     st.subheader("Document Tracking")
+        
+    #     # 1. Search interface
+    #     st.write("### 🔍 Search Documents by Recipient")
+        
+    #     col1, col2 = st.columns([3, 1])
+        
+    #     with col1:
+    #         search_term = st.text_input(
+    #             "Enter recipient name or email:",
+    #             placeholder="e.g., John Smith or john@example.com",
+    #             help="Search for documents sent to a specific recipient"
+    #         )
+        
+    #     with col2:
+    #         st.write("")
+    #         st.write("")
+    #         search_button = st.button("🔍 Search", use_container_width=True)
+        
+    #     # Show results when search is performed
+    #     if search_term and search_button:
+    #         with st.spinner(f"Searching for documents sent to '{search_term}'..."):
+    #             results = search_documents_by_recipient(search_term)
+                
+    #             if not results:
+    #                 st.info(f"No documents found for recipient: '{search_term}'")
+    #             else:
+    #                 st.success(f"Found {len(results)} document(s) for recipient: '{search_term}'")
+                    
+    #                 # Display results in a visually appealing way
+    #                 for idx, item in enumerate(results):
+    #                     instance = item["instance"]
+    #                     document = item["document"]
+                        
+    #                     # Create a card-like container for each result
+    #                     status = instance.get("status", "unknown")
+    #                     status_emoji = "✅" if status == "signed" else "👁️" if status == "viewed" else "❌" if status == "declined" else "⏱️" if status == "expired" else "📤"
+                        
+    #                     # Create a nice card-like container with a border
+    #                     st.markdown(f"""
+    #                     <div style="border:1px solid #ddd; border-radius:5px; padding:15px; margin-bottom:15px;">
+    #                         <h3>{document.get('title', 'Untitled Document')}</h3>
+    #                     </div>
+    #                     """, unsafe_allow_html=True)
+                        
+    #                     col1, col2 = st.columns([3, 1])
+                        
+    #                     with col1:
+    #                         st.markdown(f"**Type:** {document.get('document_type', '').replace('_', ' ').title()}")
+    #                         st.markdown(f"**Recipient:** {instance.get('recipient_name', 'Unknown')}")
+    #                         st.markdown(f"**Email:** {instance.get('recipient_email', 'Unknown')}")
+                            
+    #                         # Show document URL if available
+    #                         if document.get("document_url"):
+    #                             st.markdown(f"**Document URL:** [Open Document]({document.get('document_url')})")
+                            
+    #                         # Format dates for better readability
+    #                         if instance.get("sent_at_formatted"):
+    #                             st.markdown(f"**Sent:** {instance.get('sent_at_formatted')}")
+    #                         if instance.get("viewed_at_formatted"):
+    #                             st.markdown(f"**Viewed:** {instance.get('viewed_at_formatted')}")
+    #                         if instance.get("signed_at_formatted"):
+    #                             st.markdown(f"**Signed:** {instance.get('signed_at_formatted')}")
+    #                         if instance.get("expiration_date_formatted"):
+    #                             st.markdown(f"**Expires:** {instance.get('expiration_date_formatted')}")
+                        
+    #                     with col2:
+    #                         st.markdown(f"**Status:** {status_emoji} {status.capitalize()}")
+                            
+    #                         # Add action buttons based on document status
+    #                         if status in ["sent", "viewed"]:
+    #                             if st.button("📧 Send Reminder", key=f"remind_{idx}"):
+    #                                 reminder_sent = send_reminder(instance["instance_id"])
+    #                                 if reminder_sent:
+    #                                     st.success("✅ Reminder sent successfully!")
+    #                                 else:
+    #                                     st.error("❌ Failed to send reminder.")
+                        
+    #                     # Show activity log in an expander
+    #                     with st.expander("View Activity History", expanded=False):
+    #                         activity_log = instance.get("activity_log", [])
+    #                         if activity_log:
+    #                             for activity in sorted(activity_log, key=lambda x: x.get("timestamp", datetime.min), reverse=True):
+    #                                 timestamp = activity.get("timestamp")
+    #                                 action = activity.get("action", "")
+    #                                 details = activity.get("details", "")
+                                    
+    #                                 if isinstance(timestamp, datetime):
+    #                                     timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    #                                 else:
+    #                                     timestamp_str = str(timestamp)
+                                    
+    #                                 action_emoji = "🆕" if action == "created" else "📤" if action == "sent" else "👁️" if action == "viewed" else "✅" if action == "signed" else "❌" if action == "declined" else "📧" if action == "reminder_sent" else "⏱️" if action == "expired" else ""
+                                    
+    #                                 st.markdown(f"{action_emoji} **{timestamp_str}**: {action.capitalize()} - {details}")
+    #                         else:
+    #                             st.write("No activity recorded for this document.")
+                        
+    #                     # Add a divider between results
+    #                     st.markdown("---")
+                    
+    #                 # Add a clear results button
+    #                 if st.button("🔄 Clear Results"):
+    #                     st.rerun()
+        
+    #     # 2. Advanced search options
+    #     with st.expander("Advanced Search Options", expanded=False):
+    #         st.write("Filter documents by additional criteria:")
+            
+    #         col1, col2 = st.columns(2)
+            
+    #         with col1:
+    #             status_filter = st.multiselect(
+    #                 "Document Status",
+    #                 ["sent", "viewed", "signed", "declined", "expired"],
+    #                 default=None,
+    #                 help="Filter by document status"
+    #             )
+            
+    #         with col2:
+    #             date_range = st.date_input(
+    #                 "Date Range",
+    #                 value=[],
+    #                 help="Filter by sent date"
+    #             )
+            
+    #         program_filter = st.selectbox(
+    #             "Filter by Program",
+    #             options=["All Programs"] + [p["program_name"] for p in list_programs()],
+    #             help="Filter documents by their associated program"
+    #         )
+            
+    #         if st.button("Apply Filters"):
+    #             st.info("Advanced filtering will be implemented in a future update.")
+        
+       # 3. Feature to send documents to all participants in a program
+           # st.write("---")
+        # st.write("### 📨 Send to Program Participants")
+        # st.write("Send documents to all participants in a specific program.")
+        
+        # # Program selection
+        # program_options = list_programs()
+        # if not is_admin:
+        #     permitted_ids = st.session_state.get("instructor_program_ids", [])
+        #     program_options = [p for p in program_options if p["program_id"] in permitted_ids]
+        
+        # if program_options:
+        #     # Select program
+        #     selected_program_id = st.selectbox(
+        #         "Select Program",
+        #         options=[p["program_id"] for p in program_options],
+        #         format_func=lambda pid: next((p["program_name"] for p in program_options if p["program_id"] == pid), "Unknown")
+        #     )
+            
+        #     # Select document to send
+        #     documents = list_documents(
+        #         owner_id=None if is_admin else instructor_id,
+        #         program_id=selected_program_id
+        #     )
+            
+        #     if documents:
+        #         document_id = st.selectbox(
+        #             "Select Document to Send",
+        #             options=[d["document_id"] for d in documents],
+        #             format_func=lambda did: next((d["title"] for d in documents if d["document_id"] == did), "Unknown")
+        #         )
+                
+        #         # Confirmation button
+        #         if st.button("Send to All Program Participants"):
+        #             # Get all students in the program
+        #             students = get_all_students(program_ids=[selected_program_id])
+                    
+        #             if students:
+        #                 with st.spinner(f"Sending document to {len(students)} participants..."):
+        #                     success_count = 0
+        #                     for student in students:
+        #                         # Create document instance for each student
+        #                         if student.get("contact_email"):  # Only send to students with emails
+        #                             instance_id = create_document_instance(
+        #                                 document_id=document_id,
+        #                                 recipient_id=student["student_id"],
+        #                                 recipient_type="student",
+        #                                 recipient_name=student["name"],
+        #                                 recipient_email=student["contact_email"],
+        #                                 expiration_days=30  # Default 30 days
+        #                             )
+                                    
+        #                             if instance_id:
+        #                                 # Send the document
+        #                                 if send_document(instance_id):
+        #                                     success_count += 1
+                            
+        #                     if success_count > 0:
+        #                         st.success(f"✅ Document sent successfully to {success_count} participants!")
+        #                     else:
+        #                         st.error("Failed to send documents. Please check participant email addresses.")
+        #             else:
+        #                 st.warning("No participants found in this program.")
+        #     else:
+        #         st.warning("No documents available for this program.")
+        # else:
+        #     st.warning("No programs available. Please create a program first.")
+        
+        # 4. Help and tips
+        with st.expander("Help & Tips", expanded=False):
+            st.markdown("""
+            ### 📋 Document Tracking Help
+            
+            **What you can do here:**
+            - Search for documents by recipient name or email
+            - See document status (sent, viewed, signed, declined)
+            - Send reminders for unsigned documents
+            - View the complete activity log for each document
+            - Send a document to all participants in a program at once
+            
+            **Tips:**
+            - Use clear document titles to easily identify them later
+            - Add detailed descriptions to help recipients understand what they're signing
+            - Send reminders for important documents that haven't been signed
+            - Check activity logs to see when documents were viewed or signed
+            """)
+    # st.subheader("Document Tracking")
+    
+    # # 1. Search interface
+    # st.write("### 🔍 Search Documents by Recipient")
+    
+    # col1, col2 = st.columns([3, 1])
+    
+    # with col1:
+    #     search_term = st.text_input(
+    #         "Enter recipient name or email:",
+    #         placeholder="e.g., John Smith or john@example.com",
+    #         help="Search for documents sent to a specific recipient"
+    #     )
+    
+    # with col2:
+    #     st.write("")
+    #     st.write("")
+    #     search_button = st.button("🔍 Search", use_container_width=True)
+    
+    # # Show results when search is performed
+    # if search_term and search_button:
+    #     with st.spinner(f"Searching for documents sent to '{search_term}'..."):
+    #         results = search_documents_by_recipient(search_term)
+            
+    #         if not results:
+    #             st.info(f"No documents found for recipient: '{search_term}'")
+    #         else:
+    #             st.success(f"Found {len(results)} document(s) for recipient: '{search_term}'")
+                
+    #             # Display results in a visually appealing way
+    #             for idx, item in enumerate(results):
+    #                 instance = item["instance"]
+    #                 document = item["document"]
+                    
+    #                 # Create a card-like container for each result
+    #                 status = instance.get("status", "unknown")
+    #                 status_emoji = "✅" if status == "signed" else "👁️" if status == "viewed" else "❌" if status == "declined" else "⏱️" if status == "expired" else "📤"
+                    
+    #                 st.markdown(f"### {document.get('title', 'Untitled Document')}")
+                    
+    #                 col1, col2 = st.columns([3, 1])
+                    
+    #                 with col1:
+    #                     st.markdown(f"**Type:** {document.get('document_type', '').replace('_', ' ').title()}")
+    #                     st.markdown(f"**Recipient:** {instance.get('recipient_name', 'Unknown')}")
+    #                     st.markdown(f"**Email:** {instance.get('recipient_email', 'Unknown')}")
+                        
+    #                     # Format dates for better readability
+    #                     if instance.get("sent_at_formatted"):
+    #                         st.markdown(f"**Sent:** {instance.get('sent_at_formatted')}")
+    #                     if instance.get("viewed_at_formatted"):
+    #                         st.markdown(f"**Viewed:** {instance.get('viewed_at_formatted')}")
+    #                     if instance.get("signed_at_formatted"):
+    #                         st.markdown(f"**Signed:** {instance.get('signed_at_formatted')}")
+    #                     if instance.get("expiration_date_formatted"):
+    #                         st.markdown(f"**Expires:** {instance.get('expiration_date_formatted')}")
+                    
+    #                 with col2:
+    #                     st.markdown(f"**Status:** {status_emoji} {status.capitalize()}")
+                        
+    #                     # Add action buttons based on document status
+    #                     if status in ["sent", "viewed"]:
+    #                         if st.button("📧 Send Reminder", key=f"remind_{idx}"):
+    #                             reminder_sent = send_reminder(instance["instance_id"])
+    #                             if reminder_sent:
+    #                                 st.success("✅ Reminder sent successfully!")
+    #                             else:
+    #                                 st.error("❌ Failed to send reminder.")
+                        
+    #                     # Show download button if available
+    #                     # file_path = get_document_file_path(document.get("file_location", ""))
+    #                     # if os.path.exists(file_path):
+    #                     #     with open(file_path, "rb") as f:
+    #                     #         file_data = f.read()
+    #                     #         file_name = os.path.basename(file_path)
+    #                     #         st.download_button(
+    #                     #             "📄 Download",
+    #                     #             data=file_data,
+    #                     #             file_name=file_name,
+    #                     #             mime=document.get("file_type", "application/octet-stream"),
+    #                     #             key=f"download_{idx}"
+    #                     #         )
+                    
+    #                 # Show activity log in an expander
+    #                 with st.expander("View Activity History", expanded=False):
+    #                     activity_log = instance.get("activity_log", [])
+    #                     if activity_log:
+    #                         for activity in sorted(activity_log, key=lambda x: x.get("timestamp", datetime.min), reverse=True):
+    #                             timestamp = activity.get("timestamp")
+    #                             action = activity.get("action", "")
+    #                             details = activity.get("details", "")
+                                
+    #                             if isinstance(timestamp, datetime):
+    #                                 timestamp_str = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+    #                             else:
+    #                                 timestamp_str = str(timestamp)
+                                
+    #                             action_emoji = "🆕" if action == "created" else "📤" if action == "sent" else "👁️" if action == "viewed" else "✅" if action == "signed" else "❌" if action == "declined" else "📧" if action == "reminder_sent" else "⏱️" if action == "expired" else ""
+                                
+    #                             st.markdown(f"{action_emoji} **{timestamp_str}**: {action.capitalize()} - {details}")
+    #                     else:
+    #                         st.write("No activity recorded for this document.")
+                    
+    #                 # Add a divider between results
+    #                 st.markdown("---")
+                
+    #             # Add a clear results button
+    #             if st.button("🔄 Clear Results"):
+    #                 st.rerun()
+
+def get_nonprofit_prompts():
+    """
+    Return a dictionary of nonprofit assessment prompts with analysis descriptions
+    and sample program objectives
+    """
+    return {
+        "🌱 Community Impact Assessment": {
+            "description": "Leverage qualitative and quantitative methods to evaluate the effectiveness of programs and measure tangible community improvements. Develop impact metrics and KPIs tailored to your community outreach initiatives, facilitating clear reporting and ongoing enhancement of program strategies.",
+            "sample_objective": "Our program aims to develop youth leadership skills and improve academic outcomes through mentorship, workshops, and community service opportunities. We primarily serve underrepresented students from local schools who need additional support to reach their full potential."
+        },
+        "📊 Program Efficiency & Optimization": {
+            "description": "Apply operational data analytics to assess nonprofit program delivery, identify efficiency gaps, and propose actionable improvements. Generate reports outlining cost-saving measures, improved resource allocation, and increased effectiveness aligned with mission goals.",
+            "sample_objective": "Our program delivers essential skills training through weekly sessions, guest speakers, and hands-on projects. We focus on maximizing impact with limited resources, ensuring that our operations remain sustainable while delivering high-quality programming to participants."
+        },
+        "📈 Stakeholder Engagement Metrics": {
+            "description": "Design comprehensive stakeholder analysis using engagement data and feedback mechanisms. Create detailed reports highlighting stakeholder participation, satisfaction, and recommendations for strengthening stakeholder relationships through targeted engagement strategies.",
+            "sample_objective": "Our program engages multiple stakeholders including students, parents, school administrators, and community partners. We aim to create a collaborative ecosystem where all parties feel valued and contribute to the successful development of our youth participants."
+        },
+        "🔄 Project Lifecycle & Outcome Tracking": {
+            "description": "Develop a robust system for tracking projects from inception through completion, using data-driven methodologies to assess outcomes versus goals. Generate clear and transparent progress reports emphasizing lessons learned, impact achieved, and areas for improvement.",
+            "sample_objective": "Our program implements a structured curriculum with clear milestones and outcome measures. We track participant progress throughout the program cycle, from initial assessment through completion, measuring both quantitative metrics and qualitative growth indicators."
+        },
+        "🚦 Risk Management & Mitigation": {
+            "description": "Conduct thorough risk assessments to identify potential project and operational vulnerabilities. Generate risk management plans with actionable mitigation steps, continuously updated with real-time data to safeguard project deliverables and nonprofit resources.",
+            "sample_objective": "Our program operates in complex environments with various potential challenges. We aim to identify, assess, and mitigate risks to ensure continuity of services, safety of participants, and achievement of organizational goals despite constraints or unexpected obstacles."
+        },
+        "📣 Advocacy & Communication Impact": {
+            "description": "Utilize data insights to measure the reach and effectiveness of advocacy campaigns and communication strategies. Produce compelling reports demonstrating advocacy outcomes, narrative effectiveness, and areas for strategic improvement to enhance public awareness and policy influence.",
+            "sample_objective": "Our program includes a significant advocacy component aimed at raising awareness about youth issues and influencing positive policy changes. We communicate through various channels to educate the public, engage decision-makers, and amplify the voices of the communities we serve."
+        }
+    }
+
+
+# Modify the report generation function to better handle custom approaches
+def generate_ai_enhanced_report(pivot_df, program_name, project_description, analysis_method):
+    """
+    Generate a professional impact assessment report for nonprofit projects,
+    enhanced with actual attendance data analysis.
+    
+    Args:
+        pivot_df: DataFrame containing the attendance pivot data
+        program_name: Name of the program being analyzed
+        project_description: Text describing the project objectives and impact
+        analysis_method: The selected analysis method/framework
+        
+    Returns:
+        Generated impact assessment report text with data-driven insights
+    """
+    try:
+        # Initialize OpenAI client
+        openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
+        if not openai_api_key:
+            st.error("OpenAI API Key not found in secrets. Please configure it in Streamlit secrets.")
+            return None
+            
+        client = OpenAI(api_key=openai_api_key)
+        
+        # Extract key metrics from the pivot_df to include in the report
+        if pivot_df is not None:
+            # Calculate overall attendance metrics
+            total_students = len(pivot_df.index)
+            avg_absences = pivot_df["Total Absences"].mean() if "Total Absences" in pivot_df.columns else 0
+            max_absences = pivot_df["Total Absences"].max() if "Total Absences" in pivot_df.columns else 0
+            
+            # Identify students with high absence counts
+            absence_threshold = 3
+            high_risk_count = len(pivot_df[pivot_df["Total Absences"] > absence_threshold]) if "Total Absences" in pivot_df.columns else 0
+            high_risk_percentage = (high_risk_count / total_students * 100) if total_students > 0 else 0
+            
+            # Get most common status values for better insights
+            status_counts = {}
+            for col in pivot_df.columns:
+                if col != "Total Absences":
+                    for status in pivot_df[col].value_counts().items():
+                        status_value, count = status
+                        if status_value not in status_counts:
+                            status_counts[status_value] = 0
+                        status_counts[status_value] += count
+            
+            status_summary = ", ".join([f"{status}: {count}" for status, count in status_counts.items()])
+            
+            # Create a data summary for the AI
+            data_summary = f"""
+            Program: {program_name}
+            Total Students: {total_students}
+            Average Absences Per Student: {avg_absences:.2f}
+            Maximum Absences for Any Student: {max_absences}
+            Students with Excessive Absences (>{absence_threshold}): {high_risk_count} ({high_risk_percentage:.1f}%)
+            Status Distribution: {status_summary}
+            """
+            
+            # Get details on high-risk students if any
+            if high_risk_count > 0:
+                high_risk_details = "High-Risk Students:\n"
+                high_risk_students = pivot_df[pivot_df["Total Absences"] > absence_threshold]
+                for student_name, absences in zip(high_risk_students.index, high_risk_students["Total Absences"]):
+                    high_risk_details += f"- {student_name}: {absences} absences\n"
+                data_summary += f"\n{high_risk_details}"
+                
+        else:
+            data_summary = "No attendance data available for analysis."
+        
+        # Get the method name without the emoji for standard frameworks
+        if analysis_method.startswith("🌱") or analysis_method.startswith("📊") or analysis_method.startswith("📈") or analysis_method.startswith("🔄") or analysis_method.startswith("🚦") or analysis_method.startswith("📣"):
+            method_name = analysis_method.split(" ", 1)[1] if " " in analysis_method else analysis_method
+        else:
+            # For custom approaches, use the full text
+            method_name = analysis_method
+        
+        # Create system prompt based on analysis method and attendance data
+        system_prompt = f"""You are a professional AI analyst specializing in nonprofit impact measurement and program evaluation for Club Stride. 
+        
+Given the program description, attendance data, and analysis framework, generate a comprehensive assessment that addresses:
+
+1. Context & Program Definition: 
+   Briefly summarize the program's objectives and target participants based on the description provided.
+
+2. Attendance Data Analysis: 
+   - Provide an interpretation of the attendance metrics
+   - Identify patterns, strengths, and areas of concern
+   - Connect attendance patterns to potential program effectiveness
+
+3. {method_name} Framework Analysis: 
+   - Apply the specified analytical framework to evaluate the program
+   - Identify key metrics and strategic insights based on this framework
+   - Use the attendance data to support your analysis
+
+4. Recommendations & Next Steps: 
+   - Provide actionable recommendations to improve attendance
+   - Suggest specific approaches to better track and measure impact
+   - Outline immediate and long-term steps to enhance program effectiveness
+
+Format your report in a professional, clear style with headings and bullet points where appropriate.
+Make specific references to the attendance data provided to support your insights and recommendations."""
+        
+        # Generate the report using OpenAI
+        response = client.chat.completions.create(
+            model="gpt-4-turbo-preview",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"""
+                Program Description:
+                {project_description}
+                
+                Attendance Data Analysis:
+                {data_summary}
+                
+                Selected Analysis Framework: {method_name}
+                """}
+            ],
+            max_tokens=1500,
+            temperature=0.7
+        )
+        
+        # Extract and return the generated report
+        if response.choices and len(response.choices) > 0:
+            return response.choices[0].message.content
+        else:
+            st.error("Failed to generate report: No content returned from API")
+            return None
+            
+    except Exception as e:
+        st.error(f"Error generating impact report: {str(e)}")
+        return None
+
+
+
+def page_generate_reports():
+    # -------------------------------------------------------------------------
+    # Page Header with Description
+    # -------------------------------------------------------------------------
+    st.header("📊 Attendance Reports & Analytics")
+    st.write("Generate insights, visualizations, and downloadable reports from attendance data.")
+    
+    # Progress indicator for initial data loading
+    with st.spinner("Loading attendance data..."):
+        # 1) Admin or Instructor check
+        is_admin = st.session_state.get("is_admin", False)
+        user_type = "Admin" if is_admin else "Instructor"
+        
+        # 2) Build program map from Postgres
+        all_programs = list_programs()  # e.g. [{"program_id":1,"program_name":"STEM"}, ...]
+        prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+        
+        # 3) Determine permitted program IDs
+        if is_admin:
+            program_id_options = [p["program_id"] for p in all_programs]  # admin sees all
+        else:
+            program_id_options = st.session_state.get("instructor_program_ids", [])
+            if not program_id_options:
+                st.warning("⚠️ You have no assigned programs. Contact an admin for access.")
+                return
+        
+        # 4) Fetch attendance records from Mongo
+        records = fetch_all_attendance_records()
+        if not records:
+            st.info("ℹ️ No attendance data found.")
+            return
+        
+        # 5) Filter by permitted program IDs
+        filtered_records = [r for r in records if r.get("program_id") in program_id_options]
+        if not filtered_records:
+            st.info("ℹ️ No attendance data found for your assigned programs.")
+            return
+        
+        # 6) Flatten records
+        flattened = []
+        for r in filtered_records:
+            att = r["attendance"]
+            pid = r.get("program_id", 0)
+            flattened.append({
+                "student_id": r.get("student_id"),
+                "name": r.get("name"),
+                "program_id": pid,
+                "program_name": prog_map.get(pid, f"Program ID={pid}"),
+                "date": att.get("date"),
+                "status": att.get("status"),
+                "comment": att.get("comment", "")
+            })
+        
+        if not flattened:
+            st.info("ℹ️ No valid attendance data to display.")
+            return
+        
+        df = pd.DataFrame(flattened)
+        if df.empty:
+            st.info("ℹ️ No valid attendance data to display.")
+            return
+
+    # Display data summary
+    st.success(f"✅ Loaded attendance data for {len(df['name'].unique())} students across {len(df['program_id'].unique())} programs.")
+    
+    # Create tabs for better organization - REMOVED THE 4th TAB
+    tab1, tab2, tab3 = st.tabs(["📈 Visualizations", "🔍 Data Explorer", "📑 Generate Reports"])
+    
+    with tab1:
+        # [TAB 1 CONTENT UNCHANGED]
+        # -------------------------------------------------------------------------
+        # A) Admin-Only Visualizations (Overview)
+        # -------------------------------------------------------------------------
+        if is_admin:
+            st.subheader("📊 Admin Overview Dashboard")
+            st.write("These visualizations provide a high-level overview of attendance across all programs.")
+            
+            with st.expander("Admin Visualizations of Full Attendance Data", expanded=True):
+                def status_to_numeric(s):
+                    if s == "Present":
+                        return 1
+                    elif s == "Late":
+                        return 0.5
+                    else:
+                        return 0
+                
+                df["attendance_value"] = df["status"].apply(status_to_numeric)
+                
+                # Add a metric summary at the top
+                col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+                with col_metrics1:
+                    avg_attendance = df["attendance_value"].mean() * 100
+                    st.metric("Overall Attendance Rate", f"{avg_attendance:.1f}%")
+                
+                with col_metrics2:
+                    present_rate = (df["status"] == "Present").mean() * 100
+                    st.metric("Present Rate", f"{present_rate:.1f}%")
+                
+                with col_metrics3:
+                    absent_rate = (df["status"] == "Absent").mean() * 100
+                    st.metric("Absence Rate", f"{absent_rate:.1f}%")
+                
+                # Ranking by average attendance
+                ranking_df = df.groupby("program_name", as_index=False)["attendance_value"].mean()
+                ranking_df.rename(columns={"attendance_value": "avg_attendance_score"}, inplace=True)
+                ranking_df.sort_values("avg_attendance_score", ascending=False, inplace=True)
+                
+                st.subheader("Program Ranking by Average Attendance")
+                st.dataframe(ranking_df.style.highlight_max(subset=["avg_attendance_score"]), use_container_width=True)
+                
+                # Bar chart: average attendance score
+                fig_bar = px.bar(
+                    ranking_df,
+                    x="program_name",
+                    y="avg_attendance_score",
+                    title="Average Attendance Score by Program",
+                    color="avg_attendance_score",
+                    color_continuous_scale="blues"
+                )
+                fig_bar.update_layout(xaxis_title="Program", yaxis_title="Average Attendance Score")
+                
+                # Pie chart: overall status distribution
+                status_counts = df["status"].value_counts().reset_index()
+                status_counts.columns = ["status", "count"]
+                fig_pie = px.pie(
+                    status_counts,
+                    values="count",
+                    names="status",
+                    title="Distribution of Attendance Statuses",
+                    hole=0.4,
+                    color="status",
+                    color_discrete_map={
+                        "Present": "#28a745", 
+                        "Late": "#ffc107", 
+                        "Absent": "#dc3545", 
+                        "Excused": "#6c757d"
+                    }
+                )
+                
+                # Time-series
+                df["date"] = pd.to_datetime(df["date"], errors="coerce")
+                daily_df = df.groupby("date", as_index=False)["attendance_value"].mean()
+                fig_line = px.line(
+                    daily_df,
+                    x="date",
+                    y="attendance_value",
+                    title="Average Attendance Over Time (All Programs)",
+                    markers=True
+                )
+                fig_line.update_layout(xaxis_title="Date", yaxis_title="Attendance Score")
+                
+                # Multi-line by program
+                multi_df = df.groupby(["date", "program_name"], as_index=False)["attendance_value"].mean()
+                fig_multi = px.line(
+                    multi_df,
+                    x="date",
+                    y="attendance_value",
+                    color="program_name",
+                    title="Attendance Over Time by Program",
+                    markers=True
+                )
+                fig_multi.update_layout(xaxis_title="Date", yaxis_title="Attendance Score", legend_title="Program")
+                
+                colA, colB = st.columns(2)
+                with colA:
+                    st.plotly_chart(fig_bar, use_container_width=True)
+                
+                with colB:
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                
+                st.write("---")
+                
+                st.plotly_chart(fig_line, use_container_width=True)
+                st.plotly_chart(fig_multi, use_container_width=True)
+                
+                # Download buttons for visualizations
+                st.download_button(
+                    label="📥 Download Attendance Summary CSV",
+                    data=ranking_df.to_csv(index=False).encode('utf-8'),
+                    file_name="attendance_summary.csv",
+                    mime="text/csv"
+                )
+        else:
+            # For instructors, show a simpler view
+            st.subheader("📊 Attendance Overview")
+            # Get instructor's programs
+            instructor_programs = [prog_map.get(pid, f"Program {pid}") for pid in program_id_options]
+            st.write(f"You have access to the following programs: {', '.join(instructor_programs)}")
+            
+            # Simple metrics for instructor
+            instructor_df = df.copy()
+            
+            def status_to_numeric(s):
+                if s == "Present":
+                    return 1
+                elif s == "Late":
+                    return 0.5
+                else:
+                    return 0
+            
+            instructor_df["attendance_value"] = instructor_df["status"].apply(status_to_numeric)
+            
+            # Add metrics
+            col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+            with col_metrics1:
+                avg_attendance = instructor_df["attendance_value"].mean() * 100
+                st.metric("Overall Attendance Rate", f"{avg_attendance:.1f}%")
+            
+            with col_metrics2:
+                present_rate = (instructor_df["status"] == "Present").mean() * 100
+                st.metric("Present Rate", f"{present_rate:.1f}%")
+            
+            with col_metrics3:
+                absent_rate = (instructor_df["status"] == "Absent").mean() * 100
+                st.metric("Absence Rate", f"{absent_rate:.1f}%")
+            
+            # Simple charts for instructor
+            status_counts = instructor_df["status"].value_counts().reset_index()
+            status_counts.columns = ["status", "count"]
+            fig_pie = px.pie(
+                status_counts,
+                values="count",
+                names="status",
+                title="Distribution of Attendance Statuses",
+                hole=0.4,
+                color="status",
+                color_discrete_map={
+                    "Present": "#28a745", 
+                    "Late": "#ffc107", 
+                    "Absent": "#dc3545", 
+                    "Excused": "#6c757d"
+                }
+            )
+            st.plotly_chart(fig_pie, use_container_width=True)
+    
+    with tab2:
+        # [TAB 2 CONTENT UNCHANGED]
+        # -------------------------------------------------------------------------
+        # B) Data Explorer + Chart Building from Filtered Data
+        # -------------------------------------------------------------------------
+        st.subheader("🔍 Data Explorer & Custom Charts")
+        st.write("Filter and visualize attendance data using various criteria.")
+        
+        with st.expander("How to use the Data Explorer", expanded=False):
+            st.write("""
+            1. Use the filter controls below to select specific data
+            2. The table will update to show only matching records
+            3. Choose a chart type to visualize the filtered data
+            4. The chart will update automatically based on your selection
+            """)
+        
+        explorer_output = dataframe_explorer(df, case=False)
+        explorer_df = pd.DataFrame(explorer_output)
+        
+        if explorer_df.empty:
+            st.info("ℹ️ No data matches your filter criteria. Try adjusting the filters.")
+        else:
+            st.write(f"**Showing {len(explorer_df)} records that match your criteria**")
+            st.dataframe(explorer_df, use_container_width=True)
+            
+            # Add download button for filtered data
+            st.download_button(
+                label="📥 Download Filtered Data CSV",
+                data=explorer_df.to_csv(index=False).encode('utf-8'),
+                file_name="filtered_attendance_data.csv",
+                mime="text/csv"
+            )
+            
+            st.markdown("### 📈 Build a Custom Chart")
+            st.write("Create visualizations from your filtered data")
+            
+            chart_type = st.selectbox(
+                "Select Chart Type",
+                [
+                    "Bar - Status Counts",
+                    "Line - Attendance Over Time",
+                    "Bar - Student Attendance",
+                    "Pie - Status Distribution",
+                ],
+                help="Choose the type of chart you want to create from your filtered data"
+            )
+            
+            # Convert 'date' to datetime if needed
+            explorer_df["date"] = pd.to_datetime(explorer_df["date"], errors="coerce")
+            
+            # Chart container with loading indicator
+            chart_container = st.container()
+            with chart_container:
+                with st.spinner("Generating chart..."):
+                    if chart_type == "Bar - Status Counts":
+                        status_counts = explorer_df["status"].value_counts().reset_index()
+                        status_counts.columns = ["status", "count"]
+                        fig_bar_filter = px.bar(
+                            status_counts,
+                            x="status",
+                            y="count",
+                            title="Status Counts in Filtered Data",
+                            color="status",
+                            color_discrete_map={
+                                "Present": "#28a745", 
+                                "Late": "#ffc107", 
+                                "Absent": "#dc3545", 
+                                "Excused": "#6c757d"
+                            }
+                        )
+                        st.plotly_chart(fig_bar_filter, use_container_width=True)
+                    
+                    elif chart_type == "Line - Attendance Over Time":
+                        def status_to_numeric(s):
+                            if s == "Present":
+                                return 1
+                            elif s == "Late":
+                                return 0.5
+                            else:
+                                return 0
+                        explorer_df["attendance_value"] = explorer_df["status"].apply(status_to_numeric)
+                        daily_mean = explorer_df.groupby("date", as_index=False)["attendance_value"].mean().sort_values("date")
+                        fig_line_filter = px.line(
+                            daily_mean,
+                            x="date",
+                            y="attendance_value",
+                            title="Average Attendance Over Time (Filtered Data)",
+                            markers=True
+                        )
+                        fig_line_filter.update_layout(xaxis_title="Date", yaxis_title="Attendance Score")
+                        st.plotly_chart(fig_line_filter, use_container_width=True)
+                    
+                    elif chart_type == "Bar - Student Attendance":
+                        group_data = explorer_df.groupby(["name", "status"]).size().reset_index(name="count")
+                        fig_bar_student = px.bar(
+                            group_data,
+                            x="name",
+                            y="count",
+                            color="status",
+                            barmode="group",
+                            title="Attendance by Student (Filtered Data)",
+                            color_discrete_map={
+                                "Present": "#28a745", 
+                                "Late": "#ffc107", 
+                                "Absent": "#dc3545", 
+                                "Excused": "#6c757d"
+                            }
+                        )
+                        fig_bar_student.update_layout(xaxis_title="Student Name", yaxis_title="Count")
+                        st.plotly_chart(fig_bar_student, use_container_width=True)
+                    
+                    elif chart_type == "Pie - Status Distribution":
+                        status_counts = explorer_df["status"].value_counts().reset_index()
+                        status_counts.columns = ["status", "count"]
+                        fig_pie_filter = px.pie(
+                            status_counts,
+                            values="count",
+                            names="status",
+                            title="Status Distribution (Filtered Data)",
+                            hole=0.4,
+                            color="status",
+                            color_discrete_map={
+                                "Present": "#28a745", 
+                                "Late": "#ffc107", 
+                                "Absent": "#dc3545", 
+                                "Excused": "#6c757d"
+                            }
+                        )
+                        st.plotly_chart(fig_pie_filter, use_container_width=True)
+    
+    with tab3:
+        # -------------------------------------------------------------------------
+        # C) Program-Specific XLSX (with advanced insights)
+        # -------------------------------------------------------------------------
+        st.subheader("📑 Attendance Report Generator")
+        st.write("Create detailed attendance reports with insights and export to Excel.")
+        
+        # Instructions expander
+        with st.expander("How to Create Reports", expanded=False):
+            st.write("""
+            1. Select a program from the dropdown
+            2. Click "Create Pivot + Insights" to generate the report
+            3. Review the report summary and pivot table
+            4. Click "Create Downloadable XLSX" to download the Excel file
+            5. Optionally, use the AI Impact Analysis to generate a comprehensive report
+            """)
+        
+        # Program selection card
+        st.markdown("### 1️⃣ Select Program")
+        
+        # Let user pick a program from df
+        selectable_pids = sorted(df["program_id"].unique())
+        selected_pid = st.selectbox(
+            "Select a Program to Export/Analyze",
+            options=selectable_pids,
+            format_func=lambda pid: prog_map.get(pid, f"Program ID={pid}"),
+            help="Choose which program's attendance data to analyze"
+        )
+        
+        # Initialize session state for pivot data
+        if "pivot_df" not in st.session_state:
+            st.session_state["pivot_df"] = None
+        
+        # Create a nice card-like container for the report generation button
+        st.markdown("### 2️⃣ Generate Report")
+        
+        if st.button("🔄 Create Pivot + Insights", help="Click to generate the attendance report"):
+            with st.spinner("Generating report..."):
+                # Filter DF to chosen program
+                sub_df = df[df["program_id"] == selected_pid].copy()
+                if sub_df.empty:
+                    st.warning("⚠️ No attendance data for that program!")
+                    return
+                
+                program_name = prog_map.get(selected_pid, f"Program ID={selected_pid}")
+                st.session_state["selected_program_name"] = program_name
+                
+                sub_df["date"] = pd.to_datetime(sub_df["date"], errors="coerce").dt.date
+                pivot_df = sub_df.pivot(index="name", columns="date", values="status").fillna("Missed")
+                
+                # Count absences
+                def count_absences(row):
+                    return sum(x in ["Absent", "Missed"] for x in row)
+                pivot_df["Total Absences"] = pivot_df.apply(count_absences, axis=1)
+                
+                date_columns = [col for col in pivot_df.columns if col != "Total Absences"]
+                # Create new column order with "Total Absences" as the second column
+                new_column_order = ["Total Absences"] + date_columns
+                # Reindex the DataFrame with the new column order
+                pivot_df = pivot_df[new_column_order]
+                st.session_state["pivot_df"] = pivot_df
+                
+                # Success message after report generation
+                st.success(f"✅ Report generated successfully for {program_name}")
+        
+        # Only show insights if pivot data exists
+        if st.session_state["pivot_df"] is not None:
+            st.markdown("### 3️⃣ Report Summary")
+            
+            # Get program name from session state
+            program_name = st.session_state.get("selected_program_name", "Selected Program")
+            
+            pivot_df = st.session_state["pivot_df"]
+            
+            # ---- Additional Summaries/Insights ----
+            total_students = len(pivot_df.index)
+            average_absences = pivot_df["Total Absences"].mean()
+            max_absences = pivot_df["Total Absences"].max()
+            
+            # Use columns for a nicer layout of metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Program", program_name)
+            with col2:
+                st.metric("Total Students", total_students)
+            with col3:
+                st.metric("Avg. Absences", f"{average_absences:.2f}")
+            
+            # "High-risk" threshold with a visual indicator
+            absence_threshold = 3
+            high_risk_count = len(pivot_df[pivot_df["Total Absences"] > absence_threshold])
+            
+            # Progress bar to visualize attendance health
+            if high_risk_count > 0:
+                risk_percent = (high_risk_count / total_students) * 100
+                st.warning(f"⚠️ {high_risk_count} of {total_students} students ({risk_percent:.1f}%) have excessive absences")
+                
+                # Show detailed high risk information
+                high_risk_students = pivot_df[pivot_df["Total Absences"] > absence_threshold].index.tolist()
+                with st.expander(f"View {high_risk_count} Students with Excessive Absences", expanded=True):
+                    for s in high_risk_students:
+                        st.write(f"- **{s}**: {pivot_df.loc[s, 'Total Absences']} absences")
+            else:
+                st.success(f"✅ No students have more than {absence_threshold} absences. Great job!")
+            
+            st.markdown("### 4️⃣ Attendance Pivot Table")
+            st.write("The table below shows attendance status for each student by date, with high absence counts highlighted in red.")
+            
+            # highlight rows above threshold
+            pivot_styled = st.session_state["pivot_df"].style.apply(
+                highlight_high_absences, axis=1
+            )
+            st.dataframe(pivot_styled, use_container_width=True)
+            
+            # Add a nice download button with icon
+            excel_button_container = st.container()
+            with excel_button_container:
+                download_col1, download_col2 = st.columns([3, 1])
+                with download_col1:
+                    st.markdown("### 5️⃣ Export Report")
+                    st.write("Download the complete report as an Excel file.")
+                
+                with download_col2:
+                    if st.button("📥 Create XLSX", help="Generate an Excel file with the attendance data"):
+                        with st.spinner("Creating Excel file..."):
+                            output = io.BytesIO()
+                            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+                                st.session_state["pivot_df"].to_excel(writer, sheet_name="Attendance Pivot")
+                                
+                                workbook = writer.book
+                                worksheet = writer.sheets["Attendance Pivot"]
+                                red_format = workbook.add_format({"font_color": "red"})
+                                row_count, col_count = st.session_state["pivot_df"].shape
+                                worksheet.conditional_format(
+                                    1, 1, row_count, col_count,
+                                    {
+                                        "type": "text",
+                                        "criteria": "containing",
+                                        "value": "Missed",
+                                        "format": red_format
+                                    }
+                                )
+                                
+                                # Add a summary sheet
+                                summary_df = pd.DataFrame({
+                                    "Metric": ["Program", "Total Students", "Average Absences", "Max Absences", "Students with Excessive Absences"],
+                                    "Value": [
+                                        program_name, 
+                                        total_students, 
+                                        f"{average_absences:.2f}", 
+                                        max_absences,
+                                        high_risk_count
+                                    ]
+                                })
+                                summary_df.to_excel(writer, sheet_name="Summary", index=False)
+                            
+                            excel_data = output.getvalue()
+                            
+                            file_name = f"{program_name.replace(' ', '_').lower()}_attendance.xlsx"
+                            st.download_button(
+                                label="💾 Download Excel Report",
+                                data=excel_data,
+                                file_name=file_name,
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            )
+                            
+                            st.success("✅ Excel file created successfully!")
+            
+            # -------------------------------------------------------------------------
+            # D) NEW: AI-Enhanced Program Impact Analysis (Now within the Generate Reports tab)
+            # -------------------------------------------------------------------------
+            st.write("---")
+            st.subheader("6️⃣ AI-Enhanced Program Impact Analysis")
+            st.write("Generate a comprehensive impact report that incorporates your attendance data")
+
+            # Get the prompts dictionary
+            prompts_dict = get_nonprofit_prompts()
+
+            # Add option to choose between pre-defined or custom approach
+            analysis_option = st.radio(
+                "Choose analysis type:",
+                ["Pre-defined Framework", "Custom Analysis Approach"],
+                horizontal=True,
+                help="Select a standard framework or define your own custom approach"
+            )
+            # AI-Enhanced Program Impact Analysis section with custom approach option
+# Place this within the existing Generate Reports tab after the Excel export functionality
+
+# -------------------------------------------------------------------------
+# D) AI-Enhanced Program Impact Analysis with Custom Option (Two-Column Layout)
+# -------------------------------------------------------------------------
+        st.write("---")
+        st.subheader("6️⃣ AI-Enhanced Program Impact Analysis")
+        st.write("Generate a comprehensive impact report that incorporates your attendance data")
+
+        # Get the prompts dictionary
+        prompts_dict = get_nonprofit_prompts()
+
+        # Add option to choose between pre-defined or custom approach
+        analysis_option = st.radio(
+            "Choose analysis type:",
+            ["Pre-defined Framework", "Custom Analysis Approach"],
+            horizontal=True,
+            key="impact_analysis_type",  # Added unique key parameter
+
+            help="Select a standard framework or define your own custom approach"
+        )
+
+        # Create two columns for better layout
+        col1, col2 = st.columns([3, 1])
+
+        with col1:
+            if analysis_option == "Pre-defined Framework":
+                # Standard framework selection
+                st.markdown("### Select Impact Framework:")
+                selected_approach = st.selectbox(
+                    "Choose analysis approach:",
+                    options=list(prompts_dict.keys()),
+                    help="Each framework focuses on different aspects of impact measurement"
+                )
+                
+                # Display the explanation for the selected approach
+                st.info(prompts_dict[selected_approach]["description"])
+                
+                # Get the framework name without emoji for reporting
+                framework_name = selected_approach.split(" ", 1)[1] if " " in selected_approach else selected_approach
+                
+                # Create the appropriate context automatically based on selected framework
+                template_objective = prompts_dict[selected_approach]["sample_objective"]
+                custom_context = None  # No custom context when using pre-defined frameworks
+                
+            else:  # Custom Analysis Approach
+                st.markdown("### Define Your Custom Analysis Approach")
+                
+                # Provide explanation and placeholder for custom approach
+                custom_context = st.text_area(
+                    "Describe your analysis framework:",
+                    value="""Define how you want your program to be evaluated. For example:
+                    "This analysis should focus on measuring how our program impacts student academic performance, 
+                    social-emotional development, and long-term educational outcomes. The analysis should identify 
+                    key metrics for tracking improvement, evaluate our current progress, and suggest strategic 
+                    enhancements to maximize impact."
+                    """,
+                    height=150,
+                    max_chars=1000,
+                    help="Outline the focus areas, key metrics, and specific aspects you want analyzed"
+                )
+                
+                # Set placeholder values for the reporting
+                selected_approach = "Custom Analysis Approach"
+                framework_name = "Custom Analysis"
+
+        with col2:
+            st.markdown("### Framework Focus:")
+            
+            # Display focus areas based on the selected approach or custom
+            if analysis_option == "Pre-defined Framework":
+                # Different focus areas for each pre-defined framework
+                if "Community Impact" in selected_approach:
+                    st.markdown("#### 🌱 Focus Areas:")
+                    st.markdown("• Community outcomes\n• Program effectiveness\n• Stakeholder impact")
+                elif "Efficiency" in selected_approach:
+                    st.markdown("#### 📊 Focus Areas:")
+                    st.markdown("• Resource optimization\n• Cost-benefit analysis\n• Operational improvements")
+                elif "Stakeholder" in selected_approach:
+                    st.markdown("#### 📈 Focus Areas:")
+                    st.markdown("• Engagement metrics\n• Feedback analysis\n• Relationship strength")
+                elif "Lifecycle" in selected_approach:
+                    st.markdown("#### 🔄 Focus Areas:")
+                    st.markdown("• Progress tracking\n• Milestone achievement\n• Outcome measurement")
+                elif "Risk" in selected_approach:
+                    st.markdown("#### 🚦 Focus Areas:")
+                    st.markdown("• Vulnerability assessment\n• Mitigation strategies\n• Contingency planning")
+                elif "Advocacy" in selected_approach:
+                    st.markdown("#### 📣 Focus Areas:")
+                    st.markdown("• Message effectiveness\n• Outreach impact\n• Policy influence")
+            else:
+                # For custom analysis, show generic focus areas as a guide
+                st.markdown("#### 🔍 Custom Analysis Areas")
+                st.markdown("Consider including:")
+                st.markdown("• Program-specific metrics\n• Key outcomes to measure\n• Success indicators\n• Impact evaluation methods")
+                st.markdown("")
+                st.markdown("Your custom approach will analyze attendance data through the lens of your defined framework.")
+
+        # Generate report button with more prominent styling
+        if st.button("🧠 Generate AI-Enhanced Impact Report", 
+                    use_container_width=True,
+                    help="Create a comprehensive analysis using attendance data and the selected framework"):
+            
+            # Check that we have pivot data to work with
+            if "pivot_df" not in st.session_state or st.session_state["pivot_df"] is None:
+                st.warning("⚠️ Please generate the attendance pivot table first by selecting a program above.")
+            else:
+                program_name = st.session_state.get("selected_program_name", "Selected Program")
+                
+                # Determine which context to use
+                if analysis_option == "Pre-defined Framework":
+                    # Get the template objective for this approach and customize it with the program name
+                    template_objective = prompts_dict[selected_approach]["sample_objective"]
+                    customized_objective = template_objective.replace("Our program", f"Our {program_name} program")
+                else:
+                    # Use the custom context provided by the user
+                    customized_objective = custom_context.replace("our program", f"our {program_name} program")
+                
+                with st.spinner(f"Generating your {framework_name} analysis..."):
+                    report_content = generate_ai_enhanced_report(
+                        st.session_state["pivot_df"],
+                        program_name,
+                        customized_objective,
+                        selected_approach
+                    )
+                    
+                    if report_content:
+                        st.success(f"✅ Impact analysis report generated successfully!")
+                        
+                        # Create a container for the report with better styling
+                        with st.expander("📋 View AI-Enhanced Impact Report", expanded=True):
+                            st.markdown(f"""
+                            <div style="padding: 20px; border-radius: 5px; border-left: 5px solid #4682B4; background-color: #f8f9fa;">
+                                <h2 style="color: #2c5282;">{program_name}: Program Impact Analysis</h2>
+                                <p><strong>Analysis Framework:</strong> {framework_name}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            st.markdown("---")
+                            st.markdown(report_content)
+                        
+                        # Create download options in a nicer layout
+                        col_download1, col_download2 = st.columns(2)
+                        
+                        with col_download1:
+                            # Plain text download
+                            st.download_button(
+                                label="📄 Download Report as Text",
+                                data=report_content,
+                                file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.txt",
+                                mime="text/plain"
+                            )
+                        
+                        with col_download2:
+                            # Formatted report content for Word/PDF
+                            formatted_report = f"""# {program_name}: Program Impact Analysis
+                            
+                            Analysis Framework: {framework_name}
+
+                            {report_content}
+
+                            ---
+                            Generated by Club Stride | Date: {datetime.now().strftime('%Y-%m-%d')}
+                            """
+                            # Word-compatible download
+                            st.download_button(
+                                label="📝 Download as Document",
+                                data=formatted_report,
+                                file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.docx",
+                                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            )
+            # if analysis_option == "Pre-defined Framework":
+            #     # Standard framework selection
+            #     st.markdown("### Select Impact Framework:")
+            #     selected_approach = st.selectbox(
+            #         "Choose analysis approach:",
+            #         options=list(prompts_dict.keys()),
+            #         help="Each framework focuses on different aspects of impact measurement"
+            #     )
+                
+            #     # Display the explanation for the selected approach
+            #     st.info(prompts_dict[selected_approach]["description"])
+                
+            #     # Add a visual icon based on the framework
+            #     framework_name = selected_approach.split(" ", 1)[1] if " " in selected_approach else selected_approach
+                
+            #     # Create the appropriate context automatically based on selected framework
+            #     template_objective = prompts_dict[selected_approach]["sample_objective"]
+            #     custom_context = None  # No custom context when using pre-defined frameworks
+                
+            # else:  # Custom Analysis Approach
+            #     st.markdown("### Define Your Custom Analysis Approach")
+                
+            #     # Provide explanation and placeholder for custom approach
+            #     custom_context = st.text_area(
+            #         "Describe your analysis framework:",
+            #         value="""Define how you want your program to be evaluated. For example:
+            #         "This analysis should focus on measuring how our program impacts student academic performance, 
+            #         social-emotional development, and long-term educational outcomes. The analysis should identify 
+            #         key metrics for tracking improvement, evaluate our current progress, and suggest strategic 
+            #         enhancements to maximize impact."
+            #         """,
+            #         height=150,
+            #         max_chars=1000,
+            #         help="Outline the focus areas, key metrics, and specific aspects you want analyzed"
+            #     )
+                
+            #     # Set placeholder values for the reporting
+            #     selected_approach = "Custom Analysis Approach"
+            #     framework_name = "Custom Analysis"
+
+            # # Generate report button with more prominent styling
+            # if st.button("🧠 Generate AI-Enhanced Impact Report", 
+            #             use_container_width=True,
+            #             help="Create a comprehensive analysis using attendance data and the selected framework"):
+                
+            #     # Check that we have pivot data to work with
+            #     if "pivot_df" not in st.session_state or st.session_state["pivot_df"] is None:
+            #         st.warning("⚠️ Please generate the attendance pivot table first by selecting a program above.")
+            #     else:
+            #         program_name = st.session_state.get("selected_program_name", "Selected Program")
+                    
+            #         # Determine which context to use
+            #         if analysis_option == "Pre-defined Framework":
+            #             # Get the template objective for this approach and customize it with the program name
+            #             template_objective = prompts_dict[selected_approach]["sample_objective"]
+            #             customized_objective = template_objective.replace("Our program", f"Our {program_name} program")
+            #         else:
+            #             # Use the custom context provided by the user
+            #             customized_objective = custom_context.replace("our program", f"our {program_name} program")
+                    
+            #         with st.spinner(f"Generating your {framework_name} analysis..."):
+            #             report_content = generate_ai_enhanced_report(
+            #                 st.session_state["pivot_df"],
+            #                 program_name,
+            #                 customized_objective,
+            #                 selected_approach
+            #             )
+                        
+            #             if report_content:
+            #                 st.success(f"✅ Impact analysis report generated successfully!")
+                            
+            #                 # Create a container for the report with better styling
+            #                 with st.expander("📋 View AI-Enhanced Impact Report", expanded=True):
+            #                     st.markdown(f"""
+            #                     <div style="padding: 20px; border-radius: 5px; border-left: 5px solid #4682B4; background-color: #f8f9fa;">
+            #                         <h2 style="color: #2c5282;">{program_name}: Program Impact Analysis</h2>
+            #                         <p><strong>Analysis Framework:</strong> {framework_name}</p>
+            #                     </div>
+            #                     """, unsafe_allow_html=True)
+            #                     st.markdown("---")
+            #                     st.markdown(report_content)
+                            
+            #                 # Create download options in a nicer layout
+            #                 col_download1, col_download2 = st.columns(2)
+                            
+            #                 with col_download1:
+            #                     # Plain text download
+            #                     st.download_button(
+            #                         label="📄 Download Report as Text",
+            #                         data=report_content,
+            #                         file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.txt",
+            #                         mime="text/plain"
+            #                     )
+                            
+            #                 with col_download2:
+            #                     # Formatted report content for Word/PDF
+            #                     formatted_report = f"""# {program_name}: Program Impact Analysis
+                                
+            #                     Analysis Framework: {framework_name}
+
+            #                     {report_content}
+
+            #                     ---
+            #                     Generated by Club Stride | Date: {datetime.now().strftime('%Y-%m-%d')}
+            #                     """
+            #                     # Word-compatible download
+            #                     st.download_button(
+            #                         label="📝 Download as Document",
+            #                         data=formatted_report,
+            #                         file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.docx",
+            #                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            #                     )
+
+
+# AI-enhanced report generator function
+# def generate_ai_enhanced_report(pivot_df, program_name, project_description, analysis_method):
+#     """
+#     Generate a professional impact assessment report for nonprofit projects,
+#     enhanced with actual attendance data analysis.
+    
+#     Args:
+#         pivot_df: DataFrame containing the attendance pivot data
+#         program_name: Name of the program being analyzed
+#         project_description: Text describing the project objectives and impact
+#         analysis_method: The selected analysis method/framework
+        
+#     Returns:
+#         Generated impact assessment report text with data-driven insights
+#     """
+#     try:
+#         # Initialize OpenAI client
+#         openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
+#         if not openai_api_key:
+#             st.error("OpenAI API Key not found in secrets. Please configure it in Streamlit secrets.")
+#             return None
+            
+#         client = OpenAI(api_key=openai_api_key)
+        
+#         # Extract key metrics from the pivot_df to include in the report
+#         if pivot_df is not None:
+#             # Calculate overall attendance metrics
+#             total_students = len(pivot_df.index)
+#             avg_absences = pivot_df["Total Absences"].mean() if "Total Absences" in pivot_df.columns else 0
+#             max_absences = pivot_df["Total Absences"].max() if "Total Absences" in pivot_df.columns else 0
+            
+#             # Identify students with high absence counts
+#             absence_threshold = 3
+#             high_risk_count = len(pivot_df[pivot_df["Total Absences"] > absence_threshold]) if "Total Absences" in pivot_df.columns else 0
+#             high_risk_percentage = (high_risk_count / total_students * 100) if total_students > 0 else 0
+            
+#             # Get most common status values for better insights
+#             status_counts = {}
+#             for col in pivot_df.columns:
+#                 if col != "Total Absences":
+#                     for status in pivot_df[col].value_counts().items():
+#                         status_value, count = status
+#                         if status_value not in status_counts:
+#                             status_counts[status_value] = 0
+#                         status_counts[status_value] += count
+            
+#             status_summary = ", ".join([f"{status}: {count}" for status, count in status_counts.items()])
+            
+#             # Create a data summary for the AI
+#             data_summary = f"""
+#             Program: {program_name}
+#             Total Students: {total_students}
+#             Average Absences Per Student: {avg_absences:.2f}
+#             Maximum Absences for Any Student: {max_absences}
+#             Students with Excessive Absences (>{absence_threshold}): {high_risk_count} ({high_risk_percentage:.1f}%)
+#             Status Distribution: {status_summary}
+#             """
+#         else:
+#             data_summary = "No attendance data available for analysis."
+        
+#         # Get the method name without the emoji
+#         method_name = analysis_method.split(" ", 1)[1] if " " in analysis_method else analysis_method
+        
+#         # Create system prompt based on analysis method and attendance data
+#         system_prompt = f"""You are a professional AI analyst specializing in nonprofit impact measurement, project management, and report generation for Club Stride. Given the program description, chosen analysis method of {method_name}, and ACTUAL ATTENDANCE DATA provided, generate a comprehensive, professional assessment addressing the following:
+
+#         1. Context & Program Definition: Briefly restate the program's primary objectives, target communities, and main challenges as described.
+        
+#         2. Attendance Data Analysis: 
+#            - Provide an interpretation of the provided attendance metrics
+#            - Identify patterns and potential concerns
+#            - Connect attendance patterns to program effectiveness
+        
+#         3. {method_name} Analysis: 
+#            - Provide an insightful analysis based on the selected approach
+#            - Highlight key metrics, methodologies, and strategic insights
+#            - Incorporate the real attendance data to support your analysis
+        
+#         4. Recommendations & Next Steps: 
+#            - Outline clear, actionable recommendations to improve attendance
+#            - Suggest specific approaches to better track and measure impact
+#            - Propose steps that Club Stride can take immediately and long-term to achieve their desired impact
+        
+#         Ensure clarity, professionalism, and actionable depth to support decision-making and future reporting.
+#         Make specific references to the attendance data provided when formulating your analysis and recommendations."""
+        
+#         # Generate the report using OpenAI
+#         response = client.chat.completions.create(
+#             model="gpt-4-turbo-preview",
+#             messages=[
+#                 {"role": "system", "content": system_prompt},
+#                 {"role": "user", "content": f"""
+#                 Program Description:
+#                 {project_description}
+                
+#                 Attendance Data Analysis:
+#                 {data_summary}
+                
+#                 Selected Analysis Method: {method_name}
+#                 """}
+#             ],
+#             max_tokens=1500,
+#             temperature=0.7
+#         )
+        
+#         # Extract and return the generated report
+#         if response.choices and len(response.choices) > 0:
+#             return response.choices[0].message.content
+#         else:
+#             st.error("Failed to generate report: No content returned from API")
+#             return None
+            
+#     except Exception as e:
+#         st.error(f"Error generating impact report: {str(e)}")
+#         return None
+
+# def page_generate_reports():
+#     # -------------------------------------------------------------------------
+#     # Page Header with Description
+#     # -------------------------------------------------------------------------
+#     st.header("📊 Attendance Reports & Analytics")
+#     st.write("Generate insights, visualizations, and downloadable reports from attendance data.")
+    
+#     # Progress indicator for initial data loading
+#     with st.spinner("Loading attendance data..."):
+#         # 1) Admin or Instructor check
+#         is_admin = st.session_state.get("is_admin", False)
+#         user_type = "Admin" if is_admin else "Instructor"
+        
+#         # 2) Build program map from Postgres
+#         all_programs = list_programs()  # e.g. [{"program_id":1,"program_name":"STEM"}, ...]
+#         prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+        
+#         # 3) Determine permitted program IDs
+#         if is_admin:
+#             program_id_options = [p["program_id"] for p in all_programs]  # admin sees all
+#         else:
+#             program_id_options = st.session_state.get("instructor_program_ids", [])
+#             if not program_id_options:
+#                 st.warning("⚠️ You have no assigned programs. Contact an admin for access.")
+#                 return
+        
+#         # 4) Fetch attendance records from Mongo
+#         records = fetch_all_attendance_records()
+#         if not records:
+#             st.info("ℹ️ No attendance data found.")
+#             return
+        
+#         # 5) Filter by permitted program IDs
+#         filtered_records = [r for r in records if r.get("program_id") in program_id_options]
+#         if not filtered_records:
+#             st.info("ℹ️ No attendance data found for your assigned programs.")
+#             return
+        
+#         # 6) Flatten records
+#         flattened = []
+#         for r in filtered_records:
+#             att = r["attendance"]
+#             pid = r.get("program_id", 0)
+#             flattened.append({
+#                 "student_id": r.get("student_id"),
+#                 "name": r.get("name"),
+#                 "program_id": pid,
+#                 "program_name": prog_map.get(pid, f"Program ID={pid}"),
+#                 "date": att.get("date"),
+#                 "status": att.get("status"),
+#                 "comment": att.get("comment", "")
+#             })
+        
+#         if not flattened:
+#             st.info("ℹ️ No valid attendance data to display.")
+#             return
+        
+#         df = pd.DataFrame(flattened)
+#         if df.empty:
+#             st.info("ℹ️ No valid attendance data to display.")
+#             return
+
+#     # Display data summary
+#     st.success(f"✅ Loaded attendance data for {len(df['name'].unique())} students across {len(df['program_id'].unique())} programs.")
+    
+#     # Create tabs for better organization - REMOVED THE 4th TAB
+#     tab1, tab2, tab3 = st.tabs(["📈 Visualizations", "🔍 Data Explorer", "📑 Generate Reports"])
+    
+#     with tab1:
+#         # [TAB 1 CONTENT UNCHANGED]
+#         # -------------------------------------------------------------------------
+#         # A) Admin-Only Visualizations (Overview)
+#         # -------------------------------------------------------------------------
+#         if is_admin:
+#             st.subheader("📊 Admin Overview Dashboard")
+#             st.write("These visualizations provide a high-level overview of attendance across all programs.")
+            
+#             with st.expander("Admin Visualizations of Full Attendance Data", expanded=True):
+#                 def status_to_numeric(s):
+#                     if s == "Present":
+#                         return 1
+#                     elif s == "Late":
+#                         return 0.5
+#                     else:
+#                         return 0
+                
+#                 df["attendance_value"] = df["status"].apply(status_to_numeric)
+                
+#                 # Add a metric summary at the top
+#                 col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+#                 with col_metrics1:
+#                     avg_attendance = df["attendance_value"].mean() * 100
+#                     st.metric("Overall Attendance Rate", f"{avg_attendance:.1f}%")
+                
+#                 with col_metrics2:
+#                     present_rate = (df["status"] == "Present").mean() * 100
+#                     st.metric("Present Rate", f"{present_rate:.1f}%")
+                
+#                 with col_metrics3:
+#                     absent_rate = (df["status"] == "Absent").mean() * 100
+#                     st.metric("Absence Rate", f"{absent_rate:.1f}%")
+                
+#                 # Ranking by average attendance
+#                 ranking_df = df.groupby("program_name", as_index=False)["attendance_value"].mean()
+#                 ranking_df.rename(columns={"attendance_value": "avg_attendance_score"}, inplace=True)
+#                 ranking_df.sort_values("avg_attendance_score", ascending=False, inplace=True)
+                
+#                 st.subheader("Program Ranking by Average Attendance")
+#                 st.dataframe(ranking_df.style.highlight_max(subset=["avg_attendance_score"]), use_container_width=True)
+                
+#                 # Bar chart: average attendance score
+#                 fig_bar = px.bar(
+#                     ranking_df,
+#                     x="program_name",
+#                     y="avg_attendance_score",
+#                     title="Average Attendance Score by Program",
+#                     color="avg_attendance_score",
+#                     color_continuous_scale="blues"
+#                 )
+#                 fig_bar.update_layout(xaxis_title="Program", yaxis_title="Average Attendance Score")
+                
+#                 # Pie chart: overall status distribution
+#                 status_counts = df["status"].value_counts().reset_index()
+#                 status_counts.columns = ["status", "count"]
+#                 fig_pie = px.pie(
+#                     status_counts,
+#                     values="count",
+#                     names="status",
+#                     title="Distribution of Attendance Statuses",
+#                     hole=0.4,
+#                     color="status",
+#                     color_discrete_map={
+#                         "Present": "#28a745", 
+#                         "Late": "#ffc107", 
+#                         "Absent": "#dc3545", 
+#                         "Excused": "#6c757d"
+#                     }
+#                 )
+                
+#                 # Time-series
+#                 df["date"] = pd.to_datetime(df["date"], errors="coerce")
+#                 daily_df = df.groupby("date", as_index=False)["attendance_value"].mean()
+#                 fig_line = px.line(
+#                     daily_df,
+#                     x="date",
+#                     y="attendance_value",
+#                     title="Average Attendance Over Time (All Programs)",
+#                     markers=True
+#                 )
+#                 fig_line.update_layout(xaxis_title="Date", yaxis_title="Attendance Score")
+                
+#                 # Multi-line by program
+#                 multi_df = df.groupby(["date", "program_name"], as_index=False)["attendance_value"].mean()
+#                 fig_multi = px.line(
+#                     multi_df,
+#                     x="date",
+#                     y="attendance_value",
+#                     color="program_name",
+#                     title="Attendance Over Time by Program",
+#                     markers=True
+#                 )
+#                 fig_multi.update_layout(xaxis_title="Date", yaxis_title="Attendance Score", legend_title="Program")
+                
+#                 colA, colB = st.columns(2)
+#                 with colA:
+#                     st.plotly_chart(fig_bar, use_container_width=True)
+                
+#                 with colB:
+#                     st.plotly_chart(fig_pie, use_container_width=True)
+                
+#                 st.write("---")
+                
+#                 st.plotly_chart(fig_line, use_container_width=True)
+#                 st.plotly_chart(fig_multi, use_container_width=True)
+                
+#                 # Download buttons for visualizations
+#                 st.download_button(
+#                     label="📥 Download Attendance Summary CSV",
+#                     data=ranking_df.to_csv(index=False).encode('utf-8'),
+#                     file_name="attendance_summary.csv",
+#                     mime="text/csv"
+#                 )
+#         else:
+#             # For instructors, show a simpler view
+#             st.subheader("📊 Attendance Overview")
+#             # Get instructor's programs
+#             instructor_programs = [prog_map.get(pid, f"Program {pid}") for pid in program_id_options]
+#             st.write(f"You have access to the following programs: {', '.join(instructor_programs)}")
+            
+#             # Simple metrics for instructor
+#             instructor_df = df.copy()
+            
+#             def status_to_numeric(s):
+#                 if s == "Present":
+#                     return 1
+#                 elif s == "Late":
+#                     return 0.5
+#                 else:
+#                     return 0
+            
+#             instructor_df["attendance_value"] = instructor_df["status"].apply(status_to_numeric)
+            
+#             # Add metrics
+#             col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
+#             with col_metrics1:
+#                 avg_attendance = instructor_df["attendance_value"].mean() * 100
+#                 st.metric("Overall Attendance Rate", f"{avg_attendance:.1f}%")
+            
+#             with col_metrics2:
+#                 present_rate = (instructor_df["status"] == "Present").mean() * 100
+#                 st.metric("Present Rate", f"{present_rate:.1f}%")
+            
+#             with col_metrics3:
+#                 absent_rate = (instructor_df["status"] == "Absent").mean() * 100
+#                 st.metric("Absence Rate", f"{absent_rate:.1f}%")
+            
+#             # Simple charts for instructor
+#             status_counts = instructor_df["status"].value_counts().reset_index()
+#             status_counts.columns = ["status", "count"]
+#             fig_pie = px.pie(
+#                 status_counts,
+#                 values="count",
+#                 names="status",
+#                 title="Distribution of Attendance Statuses",
+#                 hole=0.4,
+#                 color="status",
+#                 color_discrete_map={
+#                     "Present": "#28a745", 
+#                     "Late": "#ffc107", 
+#                     "Absent": "#dc3545", 
+#                     "Excused": "#6c757d"
+#                 }
+#             )
+#             st.plotly_chart(fig_pie, use_container_width=True)
+    
+#     with tab2:
+#         # [TAB 2 CONTENT UNCHANGED]
+#         # -------------------------------------------------------------------------
+#         # B) Data Explorer + Chart Building from Filtered Data
+#         # -------------------------------------------------------------------------
+#         st.subheader("🔍 Data Explorer & Custom Charts")
+#         st.write("Filter and visualize attendance data using various criteria.")
+        
+#         with st.expander("How to use the Data Explorer", expanded=False):
+#             st.write("""
+#             1. Use the filter controls below to select specific data
+#             2. The table will update to show only matching records
+#             3. Choose a chart type to visualize the filtered data
+#             4. The chart will update automatically based on your selection
+#             """)
+        
+#         explorer_output = dataframe_explorer(df, case=False)
+#         explorer_df = pd.DataFrame(explorer_output)
+        
+#         if explorer_df.empty:
+#             st.info("ℹ️ No data matches your filter criteria. Try adjusting the filters.")
+#         else:
+#             st.write(f"**Showing {len(explorer_df)} records that match your criteria**")
+#             st.dataframe(explorer_df, use_container_width=True)
+            
+#             # Add download button for filtered data
+#             st.download_button(
+#                 label="📥 Download Filtered Data CSV",
+#                 data=explorer_df.to_csv(index=False).encode('utf-8'),
+#                 file_name="filtered_attendance_data.csv",
+#                 mime="text/csv"
+#             )
+            
+#             st.markdown("### 📈 Build a Custom Chart")
+#             st.write("Create visualizations from your filtered data")
+            
+#             chart_type = st.selectbox(
+#                 "Select Chart Type",
+#                 [
+#                     "Bar - Status Counts",
+#                     "Line - Attendance Over Time",
+#                     "Bar - Student Attendance",
+#                     "Pie - Status Distribution",
+#                 ],
+#                 help="Choose the type of chart you want to create from your filtered data"
+#             )
+            
+#             # Convert 'date' to datetime if needed
+#             explorer_df["date"] = pd.to_datetime(explorer_df["date"], errors="coerce")
+            
+#             # Chart container with loading indicator
+#             chart_container = st.container()
+#             with chart_container:
+#                 with st.spinner("Generating chart..."):
+#                     if chart_type == "Bar - Status Counts":
+#                         status_counts = explorer_df["status"].value_counts().reset_index()
+#                         status_counts.columns = ["status", "count"]
+#                         fig_bar_filter = px.bar(
+#                             status_counts,
+#                             x="status",
+#                             y="count",
+#                             title="Status Counts in Filtered Data",
+#                             color="status",
+#                             color_discrete_map={
+#                                 "Present": "#28a745", 
+#                                 "Late": "#ffc107", 
+#                                 "Absent": "#dc3545", 
+#                                 "Excused": "#6c757d"
+#                             }
+#                         )
+#                         st.plotly_chart(fig_bar_filter, use_container_width=True)
+                    
+#                     elif chart_type == "Line - Attendance Over Time":
+#                         def status_to_numeric(s):
+#                             if s == "Present":
+#                                 return 1
+#                             elif s == "Late":
+#                                 return 0.5
+#                             else:
+#                                 return 0
+#                         explorer_df["attendance_value"] = explorer_df["status"].apply(status_to_numeric)
+#                         daily_mean = explorer_df.groupby("date", as_index=False)["attendance_value"].mean().sort_values("date")
+#                         fig_line_filter = px.line(
+#                             daily_mean,
+#                             x="date",
+#                             y="attendance_value",
+#                             title="Average Attendance Over Time (Filtered Data)",
+#                             markers=True
+#                         )
+#                         fig_line_filter.update_layout(xaxis_title="Date", yaxis_title="Attendance Score")
+#                         st.plotly_chart(fig_line_filter, use_container_width=True)
+                    
+#                     elif chart_type == "Bar - Student Attendance":
+#                         group_data = explorer_df.groupby(["name", "status"]).size().reset_index(name="count")
+#                         fig_bar_student = px.bar(
+#                             group_data,
+#                             x="name",
+#                             y="count",
+#                             color="status",
+#                             barmode="group",
+#                             title="Attendance by Student (Filtered Data)",
+#                             color_discrete_map={
+#                                 "Present": "#28a745", 
+#                                 "Late": "#ffc107", 
+#                                 "Absent": "#dc3545", 
+#                                 "Excused": "#6c757d"
+#                             }
+#                         )
+#                         fig_bar_student.update_layout(xaxis_title="Student Name", yaxis_title="Count")
+#                         st.plotly_chart(fig_bar_student, use_container_width=True)
+                    
+#                     elif chart_type == "Pie - Status Distribution":
+#                         status_counts = explorer_df["status"].value_counts().reset_index()
+#                         status_counts.columns = ["status", "count"]
+#                         fig_pie_filter = px.pie(
+#                             status_counts,
+#                             values="count",
+#                             names="status",
+#                             title="Status Distribution (Filtered Data)",
+#                             hole=0.4,
+#                             color="status",
+#                             color_discrete_map={
+#                                 "Present": "#28a745", 
+#                                 "Late": "#ffc107", 
+#                                 "Absent": "#dc3545", 
+#                                 "Excused": "#6c757d"
+#                             }
+#                         )
+#                         st.plotly_chart(fig_pie_filter, use_container_width=True)
+    
+#     with tab3:
+#         # -------------------------------------------------------------------------
+#         # C) Program-Specific XLSX (with advanced insights)
+#         # -------------------------------------------------------------------------
+#         st.subheader("📑 Attendance Report Generator")
+#         st.write("Create detailed attendance reports with insights and export to Excel.")
+        
+#         # Instructions expander
+#         with st.expander("How to Create Reports", expanded=False):
+#             st.write("""
+#             1. Select a program from the dropdown
+#             2. Click "Create Pivot + Insights" to generate the report
+#             3. Review the report summary and pivot table
+#             4. Click "Create Downloadable XLSX" to download the Excel file
+#             5. Optionally, use the AI Impact Analysis to generate a comprehensive report
+#             """)
+        
+#         # Program selection card
+#         st.markdown("### 1️⃣ Select Program")
+        
+#         # Let user pick a program from df
+#         selectable_pids = sorted(df["program_id"].unique())
+#         selected_pid = st.selectbox(
+#             "Select a Program to Export/Analyze",
+#             options=selectable_pids,
+#             format_func=lambda pid: prog_map.get(pid, f"Program ID={pid}"),
+#             help="Choose which program's attendance data to analyze"
+#         )
+        
+#         # Initialize session state for pivot data
+#         if "pivot_df" not in st.session_state:
+#             st.session_state["pivot_df"] = None
+        
+#         # Create a nice card-like container for the report generation button
+#         st.markdown("### 2️⃣ Generate Report")
+        
+#         if st.button("🔄 Create Pivot + Insights", help="Click to generate the attendance report"):
+#             with st.spinner("Generating report..."):
+#                 # Filter DF to chosen program
+#                 sub_df = df[df["program_id"] == selected_pid].copy()
+#                 if sub_df.empty:
+#                     st.warning("⚠️ No attendance data for that program!")
+#                     return
+                
+#                 program_name = prog_map.get(selected_pid, f"Program ID={selected_pid}")
+#                 st.session_state["selected_program_name"] = program_name
+                
+#                 sub_df["date"] = pd.to_datetime(sub_df["date"], errors="coerce").dt.date
+#                 pivot_df = sub_df.pivot(index="name", columns="date", values="status").fillna("Missed")
+                
+#                 # Count absences
+#                 def count_absences(row):
+#                     return sum(x in ["Absent", "Missed"] for x in row)
+#                 pivot_df["Total Absences"] = pivot_df.apply(count_absences, axis=1)
+                
+#                 date_columns = [col for col in pivot_df.columns if col != "Total Absences"]
+#                 # Create new column order with "Total Absences" as the second column
+#                 new_column_order = ["Total Absences"] + date_columns
+#                 # Reindex the DataFrame with the new column order
+#                 pivot_df = pivot_df[new_column_order]
+#                 st.session_state["pivot_df"] = pivot_df
+                
+#                 # Success message after report generation
+#                 st.success(f"✅ Report generated successfully for {program_name}")
+        
+#         # Only show insights if pivot data exists
+#         if st.session_state["pivot_df"] is not None:
+#             st.markdown("### 3️⃣ Report Summary")
+            
+#             # Get program name from session state
+#             program_name = st.session_state.get("selected_program_name", "Selected Program")
+            
+#             pivot_df = st.session_state["pivot_df"]
+            
+#             # ---- Additional Summaries/Insights ----
+#             total_students = len(pivot_df.index)
+#             average_absences = pivot_df["Total Absences"].mean()
+#             max_absences = pivot_df["Total Absences"].max()
+            
+#             # Use columns for a nicer layout of metrics
+#             col1, col2, col3 = st.columns(3)
+#             with col1:
+#                 st.metric("Program", program_name)
+#             with col2:
+#                 st.metric("Total Students", total_students)
+#             with col3:
+#                 st.metric("Avg. Absences", f"{average_absences:.2f}")
+            
+#             # "High-risk" threshold with a visual indicator
+#             absence_threshold = 3
+#             high_risk_count = len(pivot_df[pivot_df["Total Absences"] > absence_threshold])
+            
+#             # Progress bar to visualize attendance health
+#             if high_risk_count > 0:
+#                 risk_percent = (high_risk_count / total_students) * 100
+#                 st.warning(f"⚠️ {high_risk_count} of {total_students} students ({risk_percent:.1f}%) have excessive absences")
+                
+#                 # Show detailed high risk information
+#                 high_risk_students = pivot_df[pivot_df["Total Absences"] > absence_threshold].index.tolist()
+#                 with st.expander(f"View {high_risk_count} Students with Excessive Absences", expanded=True):
+#                     for s in high_risk_students:
+#                         st.write(f"- **{s}**: {pivot_df.loc[s, 'Total Absences']} absences")
+#             else:
+#                 st.success(f"✅ No students have more than {absence_threshold} absences. Great job!")
+            
+#             st.markdown("### 4️⃣ Attendance Pivot Table")
+#             st.write("The table below shows attendance status for each student by date, with high absence counts highlighted in red.")
+            
+#             # highlight rows above threshold
+#             pivot_styled = st.session_state["pivot_df"].style.apply(
+#                 highlight_high_absences, axis=1
+#             )
+#             st.dataframe(pivot_styled, use_container_width=True)
+            
+#             # Add a nice download button with icon
+#             excel_button_container = st.container()
+#             with excel_button_container:
+#                 download_col1, download_col2 = st.columns([3, 1])
+#                 with download_col1:
+#                     st.markdown("### 5️⃣ Export Report")
+#                     st.write("Download the complete report as an Excel file.")
+                
+#                 with download_col2:
+#                     if st.button("📥 Create XLSX", help="Generate an Excel file with the attendance data"):
+#                         with st.spinner("Creating Excel file..."):
+#                             output = io.BytesIO()
+#                             with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+#                                 st.session_state["pivot_df"].to_excel(writer, sheet_name="Attendance Pivot")
+                                
+#                                 workbook = writer.book
+#                                 worksheet = writer.sheets["Attendance Pivot"]
+#                                 red_format = workbook.add_format({"font_color": "red"})
+#                                 row_count, col_count = st.session_state["pivot_df"].shape
+#                                 worksheet.conditional_format(
+#                                     1, 1, row_count, col_count,
+#                                     {
+#                                         "type": "text",
+#                                         "criteria": "containing",
+#                                         "value": "Missed",
+#                                         "format": red_format
+#                                     }
+#                                 )
+                                
+#                                 # Add a summary sheet
+#                                 summary_df = pd.DataFrame({
+#                                     "Metric": ["Program", "Total Students", "Average Absences", "Max Absences", "Students with Excessive Absences"],
+#                                     "Value": [
+#                                         program_name, 
+#                                         total_students, 
+#                                         f"{average_absences:.2f}", 
+#                                         max_absences,
+#                                         high_risk_count
+#                                     ]
+#                                 })
+#                                 summary_df.to_excel(writer, sheet_name="Summary", index=False)
+                            
+#                             excel_data = output.getvalue()
+                            
+#                             file_name = f"{program_name.replace(' ', '_').lower()}_attendance.xlsx"
+#                             st.download_button(
+#                                 label="💾 Download Excel Report",
+#                                 data=excel_data,
+#                                 file_name=file_name,
+#                                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+#                             )
+                            
+#                             st.success("✅ Excel file created successfully!")
+            
+#             # -------------------------------------------------------------------------
+#             # D) NEW: AI-Enhanced Program Impact Analysis (Now within the Generate Reports tab)
+#             # -------------------------------------------------------------------------
+#             st.write("---")
+#             st.subheader("6️⃣ AI-Enhanced Program Impact Analysis")
+#             st.write("Generate a comprehensive impact report that incorporates your attendance data")
+
+#             # Get the prompts dictionary
+#             prompts_dict = get_nonprofit_prompts()
+
+#             # Add option to choose between pre-defined or custom approach
+#             analysis_option = st.radio(
+#                 "Choose analysis type:",
+#                 ["Pre-defined Framework", "Custom Analysis Approach"],
+#                 horizontal=True,
+#                 help="Select a standard framework or define your own custom approach"
+#             )
+
+#             if analysis_option == "Pre-defined Framework":
+#                 # Standard framework selection
+#                 st.markdown("### Select Impact Framework:")
+#                 selected_approach = st.selectbox(
+#                     "Choose analysis approach:",
+#                     options=list(prompts_dict.keys()),
+#                     help="Each framework focuses on different aspects of impact measurement"
+#                 )
+                
+#                 # Display the explanation for the selected approach
+#                 st.info(prompts_dict[selected_approach]["description"])
+                
+#                 # Add a visual icon based on the framework
+#                 framework_name = selected_approach.split(" ", 1)[1] if " " in selected_approach else selected_approach
+                
+#                 # Create the appropriate context automatically based on selected framework
+#                 template_objective = prompts_dict[selected_approach]["sample_objective"]
+#                 custom_context = None  # No custom context when using pre-defined frameworks
+                
+#             else:  # Custom Analysis Approach
+#                 st.markdown("### Define Your Custom Analysis Approach")
+                
+#                 # Provide explanation and placeholder for custom approach
+#                 custom_context = st.text_area(
+#                     "Describe your analysis framework:",
+#                     value="""Define how you want your program to be evaluated. For example:
+#                     "This analysis should focus on measuring how our program impacts student academic performance, 
+#                     social-emotional development, and long-term educational outcomes. The analysis should identify 
+#                     key metrics for tracking improvement, evaluate our current progress, and suggest strategic 
+#                     enhancements to maximize impact."
+#                     """,
+#                     height=150,
+#                     max_chars=1000,
+#                     help="Outline the focus areas, key metrics, and specific aspects you want analyzed"
+#                 )
+                
+#                 # Set placeholder values for the reporting
+#                 selected_approach = "Custom Analysis Approach"
+#                 framework_name = "Custom Analysis"
+
+#             # Generate report button with more prominent styling
+#             if st.button("🧠 Generate AI-Enhanced Impact Report", 
+#                         use_container_width=True,
+#                         help="Create a comprehensive analysis using attendance data and the selected framework"):
+                
+#                 # Check that we have pivot data to work with
+#                 if "pivot_df" not in st.session_state or st.session_state["pivot_df"] is None:
+#                     st.warning("⚠️ Please generate the attendance pivot table first by selecting a program above.")
+#                 else:
+#                     program_name = st.session_state.get("selected_program_name", "Selected Program")
+                    
+#                     # Determine which context to use
+#                     if analysis_option == "Pre-defined Framework":
+#                         # Get the template objective for this approach and customize it with the program name
+#                         template_objective = prompts_dict[selected_approach]["sample_objective"]
+#                         customized_objective = template_objective.replace("Our program", f"Our {program_name} program")
+#                     else:
+#                         # Use the custom context provided by the user
+#                         customized_objective = custom_context.replace("our program", f"our {program_name} program")
+                    
+#                     with st.spinner(f"Generating your {framework_name} analysis..."):
+#                         report_content = generate_ai_enhanced_report(
+#                             st.session_state["pivot_df"],
+#                             program_name,
+#                             customized_objective,
+#                             selected_approach
+#                         )
+                        
+#                         if report_content:
+#                             st.success(f"✅ Impact analysis report generated successfully!")
+                            
+#                             # Create a container for the report with better styling
+#                             with st.expander("📋 View AI-Enhanced Impact Report", expanded=True):
+#                                 st.markdown(f"""
+#                                 <div style="padding: 20px; border-radius: 5px; border-left: 5px solid #4682B4; background-color: #f8f9fa;">
+#                                     <h2 style="color: #2c5282;">{program_name}: Program Impact Analysis</h2>
+#                                     <p><strong>Analysis Framework:</strong> {framework_name}</p>
+#                                 </div>
+#                                 """, unsafe_allow_html=True)
+#                                 st.markdown("---")
+#                                 st.markdown(report_content)
+                            
+#                             # Create download options in a nicer layout
+#                             col_download1, col_download2 = st.columns(2)
+                            
+#                             with col_download1:
+#                                 # Plain text download
+#                                 st.download_button(
+#                                     label="📄 Download Report as Text",
+#                                     data=report_content,
+#                                     file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.txt",
+#                                     mime="text/plain"
+#                                 )
+                            
+#                             with col_download2:
+#                                 # Formatted report content for Word/PDF
+#                                 formatted_report = f"""# {program_name}: Program Impact Analysis
+                                
+#                                 Analysis Framework: {framework_name}
+
+#                                 {report_content}
+
+#                                 ---
+#                                 Generated by Club Stride | Date: {datetime.now().strftime('%Y-%m-%d')}
+#                                 """
+#                                 # Word-compatible download
+#                                 st.download_button(
+#                                     label="📝 Download as Document",
+#                                     data=formatted_report,
+#                                     file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.docx",
+#                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+#                                 )
+            # st.write("---")
+            # st.subheader("6️⃣ AI-Enhanced Program Impact Analysis")
+            # st.write("Generate a comprehensive program impact report that incorporates your attendance data")
+            
+            # # Get the prompts dictionary
+            # prompts_dict = get_nonprofit_prompts()
+
+            # col1, col2 = st.columns([3, 1])
+
+            # with col1:
+            #     # Analysis method selection
+            #     st.markdown("### Select Impact Framework:")
+            #     selected_approach = st.selectbox(
+            #         "Choose analysis approach:",
+            #         options=list(prompts_dict.keys()),
+            #         help="Each framework focuses on different aspects of impact measurement"
+            #     )
+                
+            #     # Display the explanation for the selected approach
+            #     st.info(prompts_dict[selected_approach]["description"])
+
+            # with col2:
+            #     st.markdown("### Framework Details:")
+                
+            #     # Get the actual framework name without emoji
+            #     framework_name = selected_approach.split(" ", 1)[1] if " " in selected_approach else selected_approach
+                
+            #     # Add a visual icon based on the framework
+            #     if "Community Impact" in selected_approach:
+            #         st.markdown("#### 🌱 Focus Areas:")
+            #         st.markdown("• Community outcomes\n• Program effectiveness\n• Stakeholder impact")
+            #     elif "Efficiency" in selected_approach:
+            #         st.markdown("#### 📊 Focus Areas:")
+            #         st.markdown("• Resource optimization\n• Cost-benefit analysis\n• Operational improvements")
+            #     elif "Stakeholder" in selected_approach:
+            #         st.markdown("#### 📈 Focus Areas:")
+            #         st.markdown("• Engagement metrics\n• Feedback analysis\n• Relationship strength")
+            #     elif "Lifecycle" in selected_approach:
+            #         st.markdown("#### 🔄 Focus Areas:")
+            #         st.markdown("• Progress tracking\n• Milestone achievement\n• Outcome measurement")
+            #     elif "Risk" in selected_approach:
+            #         st.markdown("#### 🚦 Focus Areas:")
+            #         st.markdown("• Vulnerability assessment\n• Mitigation strategies\n• Contingency planning")
+            #     elif "Advocacy" in selected_approach:
+            #         st.markdown("#### 📣 Focus Areas:")
+            #         st.markdown("• Message effectiveness\n• Outreach impact\n• Policy influence")
+
+            # # Generate report button with more prominent styling
+            # if st.button("🧠 Generate AI-Enhanced Impact Report", 
+            #             use_container_width=True,
+            #             help="Create a comprehensive analysis using attendance data and the selected framework"):
+                
+            #     # Check that we have pivot data to work with
+            #     if "pivot_df" not in st.session_state or st.session_state["pivot_df"] is None:
+            #         st.warning("⚠️ Please generate the attendance pivot table first by selecting a program above.")
+            #     else:
+            #         program_name = st.session_state.get("selected_program_name", "Selected Program")
+                    
+            #         # Get the template objective for this approach and customize it with the program name
+            #         template_objective = prompts_dict[selected_approach]["sample_objective"]
+            #         customized_objective = template_objective.replace("Our program", f"Our {program_name} program")
+                    
+            #         with st.spinner(f"Generating your {framework_name} analysis..."):
+            #             report_content = generate_ai_enhanced_report(
+            #                 st.session_state["pivot_df"],
+            #                 program_name,
+            #                 customized_objective,
+            #                 selected_approach
+            #             )
+                        
+            #             if report_content:
+            #                 st.success(f"✅ {framework_name} report generated successfully!")
+                            
+            #                 # Create a container for the report with better styling
+            #                 with st.expander("📋 View AI-Enhanced Impact Report", expanded=True):
+            #                     st.markdown(f"""
+            #                     <div style="padding: 20px; border-radius: 5px; border-left: 5px solid #4682B4; background-color: #f8f9fa;">
+            #                         <h2 style="color: #2c5282;">{program_name}: Program Impact Analysis</h2>
+            #                         <p><strong>Analysis Framework:</strong> {framework_name}</p>
+            #                     </div>
+            #                     """, unsafe_allow_html=True)
+            #                     st.markdown("---")
+            #                     st.markdown(report_content)
+                            
+            #                 # Create download options in a nicer layout
+            #                 col_download1, col_download2 = st.columns(2)
+                            
+            #                 with col_download1:
+            #                     # Plain text download
+            #                     st.download_button(
+            #                         label="📄 Download Report as Text",
+            #                         data=report_content,
+            #                         file_name=f"{program_name.replace(' ', '_').lower()}_{framework_name.replace(' ', '_').lower()}_report.txt",
+            #                         mime="text/plain"
+            #                     )
+                            
+            #                 with col_download2:
+            #                     # Formatted report content for Word/PDF
+            #                     formatted_report = f"""# {program_name}: Program Impact Analysis
+                                
+            #                     Analysis Framework: {framework_name}
+
+            #                     {report_content}
+
+            #                     ---
+            #                     Generated by Club Stride | Date: {datetime.now().strftime('%Y-%m-%d')}
+            #                     """
+            #                     # Word-compatible download
+            #                     st.download_button(
+            #                         label="📝 Download as Document",
+            #                         data=formatted_report,
+            #                         file_name=f"{program_name.replace(' ', '_').lower()}_{framework_name.replace(' ', '_').lower()}_report.docx",
+            #                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            #                     )
+            
+            # Analysis method selection
+            # st.markdown("### Select Impact Framework:")
+            # selected_approach = st.selectbox(
+            #     "Choose analysis approach:",
+            #     options=list(prompts_dict.keys()),
+            #     help="Each approach focuses on different aspects of impact measurement"
+            # )
+            
+            # # Display the explanation for the selected approach
+            # with st.expander("About this framework", expanded=True):
+            #     st.info(prompts_dict[selected_approach]["description"])
+            
+            # # Create two columns for program description
+            # col1, col2 = st.columns([1, 1])
+            
+            # with col1:
+            #     use_template = st.checkbox("Use template description", value=True, 
+            #                               help="Use a pre-written template as a starting point")
+            
+            # with col2:
+            #     if use_template:
+            #         st.success("Using template - you can edit it below")
+            
+            # # Create the input area for program description
+            # if use_template:
+            #     # Use the sample objective from the selected approach
+            #     template_text = prompts_dict[selected_approach]["sample_objective"]
+            #     # Replace generic program name with actual program name
+            #     template_text = template_text.replace("Our program", f"Our {program_name} program")
+            # else:
+            #     # If not using template, provide a minimal starter
+            #     template_text = f"Our {program_name} program aims to..."
+            
+            # # Set session state for project description
+            # if 'nonprofit_project_description' not in st.session_state or st.session_state['nonprofit_project_description'] != template_text:
+            #     st.session_state['nonprofit_project_description'] = template_text
+            
+            # project_description = st.text_area(
+            #     "Program Description:",
+            #     value=st.session_state['nonprofit_project_description'],
+            #     height=120,
+            #     max_chars=800,
+            #     help="Describe your program's objectives, target participants, and desired outcomes"
+            # )
+            
+            # # Generate report button
+            # if st.button("🧠 Generate AI-Enhanced Impact Report", use_container_width=True):
+            #     # Save the project description for future use
+            #     st.session_state['nonprofit_project_description'] = project_description
+                
+            #     # Check that we have pivot data to work with (already confirmed earlier)
+            #     if project_description.strip() == "":
+            #         st.warning("Please provide a description of your program before generating a report.")
+            #     else:
+            #         program_name = st.session_state.get("selected_program_name", "Selected Program")
+                    
+            #         with st.spinner("Generating your AI-enhanced impact report..."):
+            #             report_content = generate_ai_enhanced_report(
+            #                 st.session_state["pivot_df"],
+            #                 program_name,
+            #                 project_description,
+            #                 selected_approach
+            #             )
+                        
+            #             if report_content:
+            #                 st.success("✅ AI-enhanced impact report generated successfully!")
+                            
+            #                 # Create a container for the report
+            #                 with st.expander("📋 View AI-Enhanced Impact Report", expanded=True):
+            #                     st.markdown(f"## {program_name}: Program Impact Analysis")
+            #                     st.markdown(f"**Analysis Framework:** {selected_approach}")
+            #                     st.markdown("---")
+            #                     st.markdown(report_content)
+                            
+            #                 # Create download options
+            #                 col_download1, col_download2 = st.columns(2)
+                            
+            #                 with col_download1:
+            #                     # Plain text download
+            #                     st.download_button(
+            #                         label="📄 Download Report as Text",
+            #                         data=report_content,
+            #                         file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.txt",
+            #                         mime="text/plain"
+            #                     )
+                            
+            #                 with col_download2:
+            #                     # Formatted report content for Word/PDF
+            #                     formatted_report = f"""# {program_name}: Program Impact Analysis
+                                
+            #                     Analysis Framework: {selected_approach}
+
+            #                     {report_content}
+
+            #                     ---
+            #                     Generated by Club Stride | Date: {datetime.now().strftime('%Y-%m-%d')}
+            #                     """
+            #                     # Word-compatible download
+            #                     st.download_button(
+            #                         label="📝 Download as Document",
+            #                         data=formatted_report,
+            #                         file_name=f"{program_name.replace(' ', '_').lower()}_impact_report.docx",
+            #                         mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            #                     )    
 
