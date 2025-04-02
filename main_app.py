@@ -487,7 +487,7 @@ def main():
         # Show tabs for the four tools: Manage Students, Manage Attendance,
         # Manage Schedules, Generate Reports
         
-        SMStabs = st.tabs(["Manage Students", "Attendance & Scheduling", "Generate Reports","Document Management"])
+        SMStabs = st.tabs(["Manage Students", "Attendance & Scheduling", "Reports & Analytics"])#"Document Management"
 
         # ----- TAB 1: Manage Students -----
         with SMStabs[0]:
@@ -499,32 +499,32 @@ def main():
 
         # ----- TAB 2: Manage Attendance -----
         with SMStabs[1]:
-            col_left, col_center, col_right = st.columns([1, 5, 1])
+            # col_left, col_center, col_right = st.columns([1, 5, 1])
 
-            with col_center:
-                st.header("Manage Attendance & Scheduling")
-                # Reuse your existing radio approach inside the tab
-                tab_labels = ["Take Attendance", "Review Attendance", "Manage Schedules"]
-                tabs = st.tabs(tab_labels)
+            # with col_center:
+            st.header("Manage Attendance & Scheduling")
+            # Reuse your existing radio approach inside the tab
+            tab_labels = ["Take Attendance", "Review Attendance", "Manage Schedules"]
+            tabs = st.tabs(tab_labels)
 
-                # if Attendance_choice == "Take Attendance":
-                with tabs[0]:
-                    if st.session_state.is_admin or st.session_state.instructor_logged_in:
-                        page_take_attendance()
-                    else:
-                        st.error("You do not have permission.")
-                # else:
-                with tabs[1]:
-                    if st.session_state.is_admin or st.session_state.instructor_logged_in:
-                        page_review_attendance()
-                    else:
-                        st.error("You do not have permission.")
+            # if Attendance_choice == "Take Attendance":
+            with tabs[0]:
+                if st.session_state.is_admin or st.session_state.instructor_logged_in:
+                    page_take_attendance()
+                else:
+                    st.error("You do not have permission.")
+            # else:
+            with tabs[1]:
+                if st.session_state.is_admin or st.session_state.instructor_logged_in:
+                    page_review_attendance()
+                else:
+                    st.error("You do not have permission.")
 
-                with tabs[2]:
-                    if st.session_state.is_admin or st.session_state.instructor_logged_in:
-                        page_manage_schedules()
-                    else:
-                        st.error("You do not have permission to access this feature.")
+            with tabs[2]:
+                if st.session_state.is_admin or st.session_state.instructor_logged_in:
+                    page_manage_schedules()
+                else:
+                    st.error("You do not have permission to access this feature.")
                     
         # ----- TAB 3: Manage Schedules -----
         with SMStabs[2]:
@@ -534,11 +534,11 @@ def main():
             else:
                 st.error("You do not have permission to access this feature.")
 
-        with SMStabs[3]:  # New tab for Document Management
-            if st.session_state.is_admin or st.session_state.instructor_logged_in:
-                page_manage_documents()
-            else:
-                st.error("You do not have permission to access this feature.")
+        # with SMStabs[3]:  # New tab for Document Management
+        #     if st.session_state.is_admin or st.session_state.instructor_logged_in:
+        #         page_manage_documents()
+        #     else:
+        #         st.error("You do not have permission to access this feature.")
 
     elif choice == "Help / User Guide":
         page_help()  # We'll define page_help() below

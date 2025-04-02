@@ -1487,573 +1487,573 @@ def page_manage_students():
         return
 
     # We'll keep your center column layout if you prefer
-    col_left, col_center, col_right = st.columns([1, 5, 1])
-    with col_center:
-        st.header("👨‍🎓 Manage Students")
+    # col_left, col_center, col_right = st.columns([1, 5, 1])
+    # with col_center:
+    st.header("👨‍🎓 Manage Students")
 
-        is_admin = st.session_state.get("is_admin", False)
-        user_role = "Administrator" if is_admin else "Instructor"
-        st.write(f"*Logged in as: {user_role}*")
+    is_admin = st.session_state.get("is_admin", False)
+    user_role = "Administrator" if is_admin else "Instructor"
+    st.write(f"*Logged in as: {user_role}*")
 
-        # ----------------------------------------------------------
-        # A) Program Filter for Admin with improved UI
-        # ----------------------------------------------------------
-        st.markdown("### 🔍 Filter Students")
+    # ----------------------------------------------------------
+    # A) Program Filter for Admin with improved UI
+    # ----------------------------------------------------------
+    st.markdown("### 🔍 Filter Students")
 
-        # Get all programs for reference
-        all_programs = list_programs()  # from instructors_db
-        prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
+    # Get all programs for reference
+    all_programs = list_programs()  # from instructors_db
+    prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
 
-        if is_admin:
-            # Build a list of (program_id, "program_name") pairs
-            program_choices = [(None, "All Programs")] + [
-                (p["program_id"], p["program_name"]) for p in all_programs
+    if is_admin:
+        # Build a list of (program_id, "program_name") pairs
+        program_choices = [(None, "All Programs")] + [
+            (p["program_id"], p["program_name"]) for p in all_programs
+        ]
+
+        with st.container():
+            selected_prog_id = st.selectbox(
+                "Select Program to View:",
+                options=[pc[0] for pc in program_choices],
+                format_func=lambda pid: "All Programs" if pid is None else f"{prog_map[pid]} (ID: {pid})",
+                help="As an admin, you can view students from all programs or filter by a specific program"
+            )
+
+        if selected_prog_id is None:
+            # Admin sees all students
+            students = get_all_students()
+            st.success("Showing all students from all programs")
+        else:
+            # Admin sees only students in the chosen program
+            students = get_all_students(program_ids=[selected_prog_id])
+            st.success(f"Showing students from: {prog_map.get(selected_prog_id, 'Unknown Program')}")
+
+    else:
+        # Instructors see only their assigned programs
+        permitted_ids = st.session_state.get("instructor_program_ids", [])
+        if not permitted_ids:
+            st.warning("⚠️ You have no assigned programs. Contact an admin for access.")
+            return
+
+        # Show a filter for instructors with multiple programs
+        if len(permitted_ids) > 1:
+            program_choices = [(None, "All My Programs")] + [
+                (pid, prog_map.get(pid, f"Program ID: {pid}")) for pid in permitted_ids
             ]
 
-            with st.container():
-                selected_prog_id = st.selectbox(
-                    "Select Program to View:",
-                    options=[pc[0] for pc in program_choices],
-                    format_func=lambda pid: "All Programs" if pid is None else f"{prog_map[pid]} (ID: {pid})",
-                    help="As an admin, you can view students from all programs or filter by a specific program"
-                )
+            selected_prog_id = st.selectbox(
+                "Filter by Program:",
+                options=[pc[0] for pc in program_choices],
+                format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}",
+                help="Select a specific program or view all your assigned programs"
+            )
 
             if selected_prog_id is None:
-                # Admin sees all students
-                students = get_all_students()
-                st.success("Showing all students from all programs")
+                # Instructor sees all their permitted programs
+                students = get_all_students(program_ids=permitted_ids)
+                program_names = [prog_map.get(pid, f"Program {pid}") for pid in permitted_ids]
+                st.success(f"Showing students from all your assigned programs: {', '.join(program_names)}")
             else:
-                # Admin sees only students in the chosen program
+                # Instructor sees only the selected program
                 students = get_all_students(program_ids=[selected_prog_id])
                 st.success(f"Showing students from: {prog_map.get(selected_prog_id, 'Unknown Program')}")
-
         else:
-            # Instructors see only their assigned programs
-            permitted_ids = st.session_state.get("instructor_program_ids", [])
-            if not permitted_ids:
-                st.warning("⚠️ You have no assigned programs. Contact an admin for access.")
-                return
+            # Instructor has only one program, so show all students from that program
+            students = get_all_students(program_ids=permitted_ids)
+            program_name = prog_map.get(permitted_ids[0], f"Program {permitted_ids[0]}")
+            st.success(f"Showing students from your assigned program: {program_name}")
 
-            # Show a filter for instructors with multiple programs
-            if len(permitted_ids) > 1:
-                program_choices = [(None, "All My Programs")] + [
-                    (pid, prog_map.get(pid, f"Program ID: {pid}")) for pid in permitted_ids
-                ]
+    st.write("---")
 
-                selected_prog_id = st.selectbox(
-                    "Filter by Program:",
-                    options=[pc[0] for pc in program_choices],
-                    format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}",
-                    help="Select a specific program or view all your assigned programs"
-                )
+    if not students:
+        st.info("📌 No students found matching your criteria.")
 
-                if selected_prog_id is None:
-                    # Instructor sees all their permitted programs
-                    students = get_all_students(program_ids=permitted_ids)
-                    program_names = [prog_map.get(pid, f"Program {pid}") for pid in permitted_ids]
-                    st.success(f"Showing students from all your assigned programs: {', '.join(program_names)}")
-                else:
-                    # Instructor sees only the selected program
-                    students = get_all_students(program_ids=[selected_prog_id])
-                    st.success(f"Showing students from: {prog_map.get(selected_prog_id, 'Unknown Program')}")
+    # ----------------------------------------------------------
+    # B) Create Tabs: [ "View & Manage" | "Add / Update" ]
+    # ----------------------------------------------------------
+    tab_labels = ["👀 View & Manage", "➕ Add or Update"]
+    tabs = st.tabs(tab_labels)
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TAB 1: VIEW & MANAGE CURRENT STUDENTS
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    with tabs[0]:
+        st.subheader("Current Students")
+
+        # Help expander
+        with st.expander("ℹ️ How to manage students", expanded=False):
+            st.markdown("""
+            ### Managing Students:
+            - **View:** Each student is displayed with their basic information
+            - **Delete:** Remove a student from the database (requires confirmation)
+            - **Edit:** Update a student's information directly within the student card
+            - **Mark Attendance:** Record attendance for today
+            - **Mark Past Attendance:** Record attendance for a previous date
+
+            All changes are saved immediately to the database.
+            """)
+
+        if students:
+            st.write(f"Total students: {len(students)}")
+
+            # Add a search box for filtering students by name
+            search_term = st.text_input(
+                "🔍 Search students by name:",
+                help="Type a name to filter the list of students"
+            )
+
+            # Filter students by search term if provided
+            if search_term:
+                filtered_students = [s for s in students if search_term.lower() in s.get("name", "").lower()]
+                if not filtered_students:
+                    st.info(f"No students found matching '{search_term}'")
+                students_to_display = filtered_students
             else:
-                # Instructor has only one program, so show all students from that program
-                students = get_all_students(program_ids=permitted_ids)
-                program_name = prog_map.get(permitted_ids[0], f"Program {permitted_ids[0]}")
-                st.success(f"Showing students from your assigned program: {program_name}")
+                students_to_display = students
 
-        st.write("---")
+            # Placeholder for attendance forms outside the loop
+            attendance_placeholder = st.empty()
 
-        if not students:
-            st.info("📌 No students found matching your criteria.")
+            for i, s in enumerate(students_to_display):
+                student_id = s.get("student_id")
+                name = s.get("name", "")
+                phone = s.get("phone", "")
+                contact_email = s.get("contact_email", "")
+                prog_id = s.get("program_id", None)
+                grade = s.get("grade", "")
+                school = s.get("school", "")
 
-        # ----------------------------------------------------------
-        # B) Create Tabs: [ "View & Manage" | "Add / Update" ]
-        # ----------------------------------------------------------
-        tab_labels = ["👀 View & Manage", "➕ Add or Update"]
-        tabs = st.tabs(tab_labels)
+                # Get program name for display
+                program_name = prog_map.get(prog_id, f"Program ID: {prog_id}")
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # TAB 1: VIEW & MANAGE CURRENT STUDENTS
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        with tabs[0]:
-            st.subheader("Current Students")
+                # Check if this student is currently being edited
+                is_editing = (st.session_state["editing_student_id"] == student_id)
 
-            # Help expander
-            with st.expander("ℹ️ How to manage students", expanded=False):
-                st.markdown("""
-                ### Managing Students:
-                - **View:** Each student is displayed with their basic information
-                - **Delete:** Remove a student from the database (requires confirmation)
-                - **Edit:** Update a student's information directly within the student card
-                - **Mark Attendance:** Record attendance for today
-                - **Mark Past Attendance:** Record attendance for a previous date
+                # Create a container/expander for each student
+                with st.container():
+                    with st.expander(f"**{name}** - {program_name}", expanded=is_editing):
+                        if not is_editing:
+                            # Normal view mode: info + actions
+                            col_info, col_actions = st.columns([3, 1])
 
-                All changes are saved immediately to the database.
-                """)
+                            with col_info:
+                                st.markdown(f"**Student ID:** {student_id}")
+                                st.markdown(f"**Program:** {program_name}")
+                                st.markdown(f"**Grade:** {grade}")
+                                st.markdown(f"**School:** {school}")
+                                st.markdown(f"**Contact:** {contact_email}")
+                                st.markdown(f"**Phone:** {phone}")
 
-            if students:
-                st.write(f"Total students: {len(students)}")
+                            with col_actions:
+                                # EDIT button
+                                if st.button("✏️ Edit", key=f"btn_edit_{student_id}",
+                                                help=f"Edit information for {name}"):
+                                    st.session_state["editing_student_id"] = student_id
+                                    st.session_state["edit_data"] = s
+                                    st.rerun()
 
-                # Add a search box for filtering students by name
-                search_term = st.text_input(
-                    "🔍 Search students by name:",
-                    help="Type a name to filter the list of students"
-                )
+                                # ATTENDANCE buttons
+                                if st.button("✅ Mark Today", key=f"btn_attendance_{student_id}",
+                                                help=f"Record today's attendance for {name}"):
+                                    st.session_state["attendance_student"] = s
+                                    st.rerun()
 
-                # Filter students by search term if provided
-                if search_term:
-                    filtered_students = [s for s in students if search_term.lower() in s.get("name", "").lower()]
-                    if not filtered_students:
-                        st.info(f"No students found matching '{search_term}'")
-                    students_to_display = filtered_students
-                else:
-                    students_to_display = students
+                                if st.button("📆 Mark Past", key=f"btn_attendance_past_{student_id}",
+                                                help=f"Record past attendance for {name}"):
+                                    st.session_state["attendance_student"] = s
+                                    st.session_state["attendance_mode"] = "past"
+                                    st.rerun()
 
-                # Placeholder for attendance forms outside the loop
-                attendance_placeholder = st.empty()
+                                # -----------------------------
+                                # DELETE: Two-step confirmation
+                                # -----------------------------
+                                delete_candidate_id = st.session_state.get("delete_candidate_id")
+                                delete_candidate_name = st.session_state.get("delete_candidate_name")
+                                delete_candidate_prog = st.session_state.get("delete_candidate_prog")
 
-                for i, s in enumerate(students_to_display):
-                    student_id = s.get("student_id")
-                    name = s.get("name", "")
-                    phone = s.get("phone", "")
-                    contact_email = s.get("contact_email", "")
-                    prog_id = s.get("program_id", None)
-                    grade = s.get("grade", "")
-                    school = s.get("school", "")
+                                if delete_candidate_id == student_id:
+                                    # We've already clicked Delete on this student in a previous run
+                                    st.warning(f"Are you sure you want to delete {delete_candidate_name}?")
 
-                    # Get program name for display
-                    program_name = prog_map.get(prog_id, f"Program ID: {prog_id}")
+                                    # No columns here - just two separate buttons
+                                    cancel_delete = st.button("Cancel Delete", key=f"cancel_delete_{student_id}")
+                                    confirm_delete = st.button("Confirm Delete", key=f"confirm_delete_{student_id}")
 
-                    # Check if this student is currently being edited
-                    is_editing = (st.session_state["editing_student_id"] == student_id)
-
-                    # Create a container/expander for each student
-                    with st.container():
-                        with st.expander(f"**{name}** - {program_name}", expanded=is_editing):
-                            if not is_editing:
-                                # Normal view mode: info + actions
-                                col_info, col_actions = st.columns([3, 1])
-
-                                with col_info:
-                                    st.markdown(f"**Student ID:** {student_id}")
-                                    st.markdown(f"**Program:** {program_name}")
-                                    st.markdown(f"**Grade:** {grade}")
-                                    st.markdown(f"**School:** {school}")
-                                    st.markdown(f"**Contact:** {contact_email}")
-                                    st.markdown(f"**Phone:** {phone}")
-
-                                with col_actions:
-                                    # EDIT button
-                                    if st.button("✏️ Edit", key=f"btn_edit_{student_id}",
-                                                 help=f"Edit information for {name}"):
-                                        st.session_state["editing_student_id"] = student_id
-                                        st.session_state["edit_data"] = s
+                                    if cancel_delete:
+                                        st.session_state["delete_candidate_id"] = None
+                                        st.session_state["delete_candidate_name"] = None
+                                        st.session_state["delete_candidate_prog"] = None
                                         st.rerun()
 
-                                    # ATTENDANCE buttons
-                                    if st.button("✅ Mark Today", key=f"btn_attendance_{student_id}",
-                                                 help=f"Record today's attendance for {name}"):
-                                        st.session_state["attendance_student"] = s
-                                        st.rerun()
-
-                                    if st.button("📆 Mark Past", key=f"btn_attendance_past_{student_id}",
-                                                 help=f"Record past attendance for {name}"):
-                                        st.session_state["attendance_student"] = s
-                                        st.session_state["attendance_mode"] = "past"
-                                        st.rerun()
-
-                                    # -----------------------------
-                                    # DELETE: Two-step confirmation
-                                    # -----------------------------
-                                    delete_candidate_id = st.session_state.get("delete_candidate_id")
-                                    delete_candidate_name = st.session_state.get("delete_candidate_name")
-                                    delete_candidate_prog = st.session_state.get("delete_candidate_prog")
-
-                                    if delete_candidate_id == student_id:
-                                        # We've already clicked Delete on this student in a previous run
-                                        st.warning(f"Are you sure you want to delete {delete_candidate_name}?")
-
-                                        # No columns here - just two separate buttons
-                                        cancel_delete = st.button("Cancel Delete", key=f"cancel_delete_{student_id}")
-                                        confirm_delete = st.button("Confirm Delete", key=f"confirm_delete_{student_id}")
-
-                                        if cancel_delete:
-                                            st.session_state["delete_candidate_id"] = None
-                                            st.session_state["delete_candidate_name"] = None
-                                            st.session_state["delete_candidate_prog"] = None
-                                            st.rerun()
-
-                                        if confirm_delete:
-                                            # Check instructor permissions
-                                            if not is_admin:
-                                                perm_ids = st.session_state.get("instructor_program_ids", [])
-                                                if delete_candidate_prog not in perm_ids:
-                                                    st.error("⛔ You are not permitted to delete students in this program.")
-                                                    st.stop()
-
-                                            with st.spinner(f"Deleting {delete_candidate_name}..."):
-                                                success = delete_student_record(delete_candidate_id)
-                                                if success:
-                                                    st.success(f"✅ Deleted student {delete_candidate_name} (ID={delete_candidate_id}).")
-                                                    # Clear the candidate & re-run
-                                                    st.session_state["delete_candidate_id"] = None
-                                                    st.session_state["delete_candidate_name"] = None
-                                                    st.session_state["delete_candidate_prog"] = None
-                                                    st.rerun()
-                                                else:
-                                                    st.error("❌ Delete failed or no such student.")
-                                    else:
-                                        # If we're not already in a delete-confirm step, show the 'Delete' button
-                                        if st.button("🗑️ Delete", key=f"btn_delete_{student_id}",
-                                                     help=f"Permanently delete {name} from the database"):
-                                            # Store this student as the candidate in session state
-                                            st.session_state["delete_candidate_id"] = student_id
-                                            st.session_state["delete_candidate_name"] = name
-                                            st.session_state["delete_candidate_prog"] = prog_id
-                                            st.rerun()
-                            else:
-                                # EDIT MODE
-                                st.subheader("✏️ Edit Student Information")
-
-                                edited_stud = st.session_state["edit_data"]
-
-                                # Guard against editing a student in a program the instructor doesn't have
-                                if not is_admin:
-                                    perm_ids = st.session_state.get("instructor_program_ids", [])
-                                    if edited_stud.get("program_id") not in perm_ids:
-                                        st.error("⛔ You do not have permission to edit students in this program.")
-                                        if st.button("OK"):
-                                            st.session_state["editing_student_id"] = None
-                                            st.rerun()
-
-                                with st.form(f"edit_student_form_{student_id}"):
-                                    col1, col2 = st.columns(2)
-
-                                    with col1:
-                                        new_name = st.text_input("Name *", value=edited_stud.get("name", ""))
-                                        new_phone = st.text_input("Phone", value=edited_stud.get("phone", ""))
-                                        new_email = st.text_input("Contact Email", value=edited_stud.get("contact_email", ""))
-
-                                    with col2:
-                                        new_grade = st.text_input("Grade", value=edited_stud.get("grade", ""))
-                                        new_school = st.text_input("School", value=edited_stud.get("school", ""))
-
-                                        # If admin, let them pick a new program
-                                        if is_admin:
-                                            all_progs = list_programs()
-                                            prog_map = {p["program_id"]: p["program_name"] for p in all_progs}
-                                            prog_ids = list(prog_map.keys())
-
-                                            current_pid = edited_stud.get("program_id")
-                                            if current_pid not in prog_ids:
-                                                prog_index = 0
-                                            else:
-                                                prog_index = prog_ids.index(current_pid)
-
-                                            selected_id = st.selectbox(
-                                                "Select Program:",
-                                                options=prog_ids,
-                                                format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})",
-                                                index=prog_index
-                                            )
-                                            new_program_id = selected_id
-                                        else:
+                                    if confirm_delete:
+                                        # Check instructor permissions
+                                        if not is_admin:
                                             perm_ids = st.session_state.get("instructor_program_ids", [])
-                                            current_pid = edited_stud.get("program_id")
-                                            if current_pid not in perm_ids and perm_ids:
-                                                current_pid = perm_ids[0]
-                                            new_program_id = st.selectbox(
-                                                "Select Program:",
-                                                options=perm_ids,
-                                                format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}",
-                                                index=perm_ids.index(current_pid) if current_pid in perm_ids else 0
-                                            )
+                                            if delete_candidate_prog not in perm_ids:
+                                                st.error("⛔ You are not permitted to delete students in this program.")
+                                                st.stop()
 
-                                    st.markdown("**Required fields are marked with * **")
+                                        with st.spinner(f"Deleting {delete_candidate_name}..."):
+                                            success = delete_student_record(delete_candidate_id)
+                                            if success:
+                                                st.success(f"✅ Deleted student {delete_candidate_name} (ID={delete_candidate_id}).")
+                                                # Clear the candidate & re-run
+                                                st.session_state["delete_candidate_id"] = None
+                                                st.session_state["delete_candidate_name"] = None
+                                                st.session_state["delete_candidate_prog"] = None
+                                                st.rerun()
+                                            else:
+                                                st.error("❌ Delete failed or no such student.")
+                                else:
+                                    # If we're not already in a delete-confirm step, show the 'Delete' button
+                                    if st.button("🗑️ Delete", key=f"btn_delete_{student_id}",
+                                                    help=f"Permanently delete {name} from the database"):
+                                        # Store this student as the candidate in session state
+                                        st.session_state["delete_candidate_id"] = student_id
+                                        st.session_state["delete_candidate_name"] = name
+                                        st.session_state["delete_candidate_prog"] = prog_id
+                                        st.rerun()
+                        else:
+                            # EDIT MODE
+                            st.subheader("✏️ Edit Student Information")
 
-                                    col_cancel, col_save = st.columns(2)
-                                    with col_cancel:
-                                        cancel_btn = st.form_submit_button("Cancel")
+                            edited_stud = st.session_state["edit_data"]
 
-                                    with col_save:
-                                        submit_btn = st.form_submit_button("Save Changes")
-
-                                    if submit_btn:
-                                        if not new_name.strip():
-                                            st.error("❌ Name is required.")
-                                        else:
-                                            with st.spinner("Updating student information..."):
-                                                try:
-                                                    msg = update_student_info(
-                                                        student_id=edited_stud["student_id"],
-                                                        new_name=new_name,
-                                                        new_phone=new_phone,
-                                                        new_contact_email=new_email,
-                                                        # If you want to store the updated program:
-                                                        # program_id=new_program_id,
-                                                        new_grade=new_grade,
-                                                        new_school=new_school
-                                                    )
-                                                    st.success(f"✅ {msg}")
-                                                    st.session_state["editing_student_id"] = None
-                                                    st.rerun()
-                                                except Exception as e:
-                                                    st.error(f"❌ Error updating student: {e}")
-
-                                    if cancel_btn:
+                            # Guard against editing a student in a program the instructor doesn't have
+                            if not is_admin:
+                                perm_ids = st.session_state.get("instructor_program_ids", [])
+                                if edited_stud.get("program_id") not in perm_ids:
+                                    st.error("⛔ You do not have permission to edit students in this program.")
+                                    if st.button("OK"):
                                         st.session_state["editing_student_id"] = None
                                         st.rerun()
 
-                        # Separator line between each student
-                        if i < len(students_to_display) - 1:
-                            st.write("---")
+                            with st.form(f"edit_student_form_{student_id}"):
+                                col1, col2 = st.columns(2)
 
-                # Handle attendance forms (outside the loop to avoid UI conflicts)
-                if "attendance_student" in st.session_state:
-                    with attendance_placeholder.container():
-                        st.write("---")
-                        st.subheader("📝 Attendance Recording")
+                                with col1:
+                                    new_name = st.text_input("Name *", value=edited_stud.get("name", ""))
+                                    new_phone = st.text_input("Phone", value=edited_stud.get("phone", ""))
+                                    new_email = st.text_input("Contact Email", value=edited_stud.get("contact_email", ""))
 
-                        single_stud = st.session_state["attendance_student"]
-                        mode = st.session_state.get("attendance_mode", "today")
+                                with col2:
+                                    new_grade = st.text_input("Grade", value=edited_stud.get("grade", ""))
+                                    new_school = st.text_input("School", value=edited_stud.get("school", ""))
 
-                        if mode == "today":
-                            handle_mark_attendance_today(single_stud)
-                            
-                        elif mode == "past":
-                            handle_mark_attendance_past(single_stud)
+                                    # If admin, let them pick a new program
+                                    if is_admin:
+                                        all_progs = list_programs()
+                                        prog_map = {p["program_id"]: p["program_name"] for p in all_progs}
+                                        prog_ids = list(prog_map.keys())
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # TAB 2: ADD OR UPDATE STUDENTS (Single or Bulk)
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        with tabs[1]:
-            st.subheader("Add or Update Students")
+                                        current_pid = edited_stud.get("program_id")
+                                        if current_pid not in prog_ids:
+                                            prog_index = 0
+                                        else:
+                                            prog_index = prog_ids.index(current_pid)
 
-            # Help expander
-            with st.expander("ℹ️ How to add students", expanded=False):
-                st.markdown("""
-                ### Adding Students:
-                - **Single Student Entry:** Add one student at a time with complete details
-                - **Bulk CSV Upload:** Upload multiple students at once using a CSV file
+                                        selected_id = st.selectbox(
+                                            "Select Program:",
+                                            options=prog_ids,
+                                            format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})",
+                                            index=prog_index
+                                        )
+                                        new_program_id = selected_id
+                                    else:
+                                        perm_ids = st.session_state.get("instructor_program_ids", [])
+                                        current_pid = edited_stud.get("program_id")
+                                        if current_pid not in perm_ids and perm_ids:
+                                            current_pid = perm_ids[0]
+                                        new_program_id = st.selectbox(
+                                            "Select Program:",
+                                            options=perm_ids,
+                                            format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}",
+                                            index=perm_ids.index(current_pid) if current_pid in perm_ids else 0
+                                        )
 
-                #### CSV Format Requirements:
-                Your CSV file should include these columns:
-                - First Name
-                - Last Name
-                - Number (phone)
-                - Email
-                - Grade
-                - School
+                                st.markdown("**Required fields are marked with * **")
 
-                The program ID will be applied to all students in the CSV.
-                """)
+                                col_cancel, col_save = st.columns(2)
+                                with col_cancel:
+                                    cancel_btn = st.form_submit_button("Cancel")
 
-            action = st.radio(
-                "Choose method:",
-                ["Single Student Entry", "Bulk CSV Upload"],
-                horizontal=True,
-                help="Choose how you want to add students to the system"
-            )
+                                with col_save:
+                                    submit_btn = st.form_submit_button("Save Changes")
 
-            if action == "Single Student Entry":
-                st.write("### Add a New Student")
+                                if submit_btn:
+                                    if not new_name.strip():
+                                        st.error("❌ Name is required.")
+                                    else:
+                                        with st.spinner("Updating student information..."):
+                                            try:
+                                                msg = update_student_info(
+                                                    student_id=edited_stud["student_id"],
+                                                    new_name=new_name,
+                                                    new_phone=new_phone,
+                                                    new_contact_email=new_email,
+                                                    # If you want to store the updated program:
+                                                    # program_id=new_program_id,
+                                                    new_grade=new_grade,
+                                                    new_school=new_school
+                                                )
+                                                st.success(f"✅ {msg}")
+                                                st.session_state["editing_student_id"] = None
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"❌ Error updating student: {e}")
 
-                with st.form("student_form"):
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        name_val = st.text_input("Name *", "", help="Student's full name")
-                        phone_val = st.text_input("Phone", "", help="Contact phone number")
-                        contact_val = st.text_input("Contact Email", "", help="Email address for the student or parent")
-
-                    with col2:
-                        grade_val = st.text_input("Grade", "", help="Student's current grade level")
-                        school_val = st.text_input("School", "", help="Student's school name")
-
-                        # Program selection based on user role
-                        if is_admin:
-                            all_progs = list_programs()
-                            if not all_progs:
-                                st.warning("⚠️ No programs found in database.")
-                                st.stop()
-
-                            prog_map = {p["program_id"]: p["program_name"] for p in all_progs}
-                            selected_id = st.selectbox(
-                                "Select Program *:",
-                                options=prog_map.keys(),
-                                format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})"
-                            )
-                            prog_val = selected_id
-                        else:
-                            perm_ids = st.session_state.get("instructor_program_ids", [])
-                            if not perm_ids:
-                                st.warning("⚠️ No assigned programs available.")
-                                prog_val = None
-                            else:
-                                prog_val = st.selectbox(
-                                    "Select Program *:",
-                                    options=perm_ids,
-                                    format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}"
-                                )
-
-                    st.markdown("**Required fields are marked with * **")
-
-                    submitted = st.form_submit_button("Save Student")
-                    if submitted:
-                        if not name_val.strip():
-                            st.error("❌ Name is required.")
-                        elif prog_val is None:
-                            st.error("❌ No valid program selected.")
-                        else:
-                            with st.spinner("Saving student information..."):
-                                result = store_student_record(
-                                    name_val, phone_val, contact_val, prog_val,
-                                    grade=grade_val, school=school_val
-                                )
-                                st.success(f"✅ {result}")
-                                if result != '':
+                                if cancel_btn:
+                                    st.session_state["editing_student_id"] = None
                                     st.rerun()
 
-            else:
-                # Bulk CSV Upload
-                st.write("### Bulk Upload Students")
+                    # Separator line between each student
+                    if i < len(students_to_display) - 1:
+                        st.write("---")
 
-                # Step 1: Select Program
-                st.markdown("#### 1️⃣ Select Program")
-                st.write("All students in the CSV will be assigned to this program:")
+            # Handle attendance forms (outside the loop to avoid UI conflicts)
+            if "attendance_student" in st.session_state:
+                with attendance_placeholder.container():
+                    st.write("---")
+                    st.subheader("📝 Attendance Recording")
 
-                if is_admin:
-                    all_progs = list_programs()
-                    if not all_progs:
-                        st.warning("⚠️ No programs found in database.")
-                        st.stop()
+                    single_stud = st.session_state["attendance_student"]
+                    mode = st.session_state.get("attendance_mode", "today")
 
-                    prog_map = {p["program_id"]: p["program_name"] for p in all_progs}
-                    selected_prog_id = st.selectbox(
-                        "Select Program for CSV Rows:",
-                        options=prog_map.keys(),
-                        format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})",
-                        key="csv_upload_program_selector_admin"
-                    )
-                else:
-                    perm_ids = st.session_state.get("instructor_program_ids", [])
-                    if not perm_ids:
-                        st.warning("⚠️ No assigned programs available.")
-                        st.stop()
-                    selected_prog_id = st.selectbox(
-                        "Select Program for CSV Rows:",
-                        options=perm_ids,
-                        format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}",
-                        key="csv_upload_program_selector"
-                    )
+                    if mode == "today":
+                        handle_mark_attendance_today(single_stud)
+                        
+                    elif mode == "past":
+                        handle_mark_attendance_past(single_stud)
 
-                # Step 2: Upload File
-                st.markdown("#### 2️⃣ Upload CSV File")
-                st.write("Upload a CSV file with student information:")
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # TAB 2: ADD OR UPDATE STUDENTS (Single or Bulk)
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    with tabs[1]:
+        st.subheader("Add or Update Students")
 
-                st.markdown("""
-                Need a template? Here's a sample CSV format:
-                ```
-                First Name,Last Name,Number,Email,Grade,School
-                John,Doe,555-123-4567,john.doe@email.com,10,Lincoln High
-                Jane,Smith,555-987-6543,jane.smith@email.com,11,Washington High
-                ```
-                """)
+        # Help expander
+        with st.expander("ℹ️ How to add students", expanded=False):
+            st.markdown("""
+            ### Adding Students:
+            - **Single Student Entry:** Add one student at a time with complete details
+            - **Bulk CSV Upload:** Upload multiple students at once using a CSV file
 
-                uploaded_file = st.file_uploader("Select a CSV file", type=["csv"])
+            #### CSV Format Requirements:
+            Your CSV file should include these columns:
+            - First Name
+            - Last Name
+            - Number (phone)
+            - Email
+            - Grade
+            - School
 
-                if uploaded_file:
-                    # Step 3: Preview and Process
-                    st.markdown("#### 3️⃣ Preview and Process")
+            The program ID will be applied to all students in the CSV.
+            """)
 
-                    with st.spinner("Reading CSV data..."):
-                        df = pd.read_csv(uploaded_file)
+        action = st.radio(
+            "Choose method:",
+            ["Single Student Entry", "Bulk CSV Upload"],
+            horizontal=True,
+            help="Choose how you want to add students to the system"
+        )
 
-                    # Preview in a clean format
-                    st.write("Preview of first 5 rows:")
-                    st.dataframe(df.head(), use_container_width=True)
+        if action == "Single Student Entry":
+            st.write("### Add a New Student")
 
-                    # Check for required columns
-                    required_cols = {"First Name", "Last Name", "Number", "Email", "Grade", "School"}
-                    missing_cols = required_cols - set(df.columns)
+            with st.form("student_form"):
+                col1, col2 = st.columns(2)
 
-                    if missing_cols:
-                        st.error(f"❌ CSV is missing required columns: {', '.join(missing_cols)}")
-                        st.info(f"Required columns are: {', '.join(required_cols)}")
+                with col1:
+                    name_val = st.text_input("Name *", "", help="Student's full name")
+                    phone_val = st.text_input("Phone", "", help="Contact phone number")
+                    contact_val = st.text_input("Contact Email", "", help="Email address for the student or parent")
+
+                with col2:
+                    grade_val = st.text_input("Grade", "", help="Student's current grade level")
+                    school_val = st.text_input("School", "", help="Student's school name")
+
+                    # Program selection based on user role
+                    if is_admin:
+                        all_progs = list_programs()
+                        if not all_progs:
+                            st.warning("⚠️ No programs found in database.")
+                            st.stop()
+
+                        prog_map = {p["program_id"]: p["program_name"] for p in all_progs}
+                        selected_id = st.selectbox(
+                            "Select Program *:",
+                            options=prog_map.keys(),
+                            format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})"
+                        )
+                        prog_val = selected_id
                     else:
-                        total_rows = len(df)
-                        st.write(f"Total records to process: {total_rows}")
+                        perm_ids = st.session_state.get("instructor_program_ids", [])
+                        if not perm_ids:
+                            st.warning("⚠️ No assigned programs available.")
+                            prog_val = None
+                        else:
+                            prog_val = st.selectbox(
+                                "Select Program *:",
+                                options=perm_ids,
+                                format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}"
+                            )
 
-                        if st.button("🔄 Process CSV Data"):
-                            progress_bar = st.progress(0)
-                            status_text = st.empty()
+                st.markdown("**Required fields are marked with * **")
 
-                            successes = 0
-                            failures = 0
-                            messages = []
-
-                            for idx, row in df.iterrows():
-                                # Update progress
-                                progress = int((idx + 1) / total_rows * 100)
-                                progress_bar.progress(progress)
-                                status_text.text(f"Processing row {idx+1} of {total_rows}...")
-
-                                try:
-                                    first_name = str(row["First Name"]).strip()
-                                    last_name = str(row["Last Name"]).strip()
-                                    name_val = f"{first_name} {last_name}".strip()
-
-                                    phone_val = row["Number"]
-                                    contact_val = row["Email"]
-                                    grade_val = row["Grade"]
-                                    school_val = row["School"]
-
-                                    # Instructors can only upload if the CSV's program_id is in their assigned list
-                                    if not is_admin:
-                                        perm_ids = st.session_state.get("instructor_program_ids", [])
-                                        if selected_prog_id not in perm_ids:
-                                            message = (f"Row {idx+1}: Program ID '{selected_prog_id}' "
-                                                       "is not in your assigned list.")
-                                            messages.append(message)
-                                            failures += 1
-                                            continue
-
-                                    result_msg = store_student_record(
-                                        name_val, phone_val, contact_val,
-                                        selected_prog_id, grade_val, school_val
-                                    )
-
-                                    if ("New student record" in result_msg) or ("updated" in result_msg):
-                                        successes += 1
-                                        messages.append(f"Row {idx+1}: {result_msg}")
-                                    else:
-                                        failures += 1
-                                        messages.append(f"Row {idx+1}: Failed - {result_msg}")
-
-                                except Exception as e:
-                                    failures += 1
-                                    messages.append(f"Row {idx+1}: Error - {str(e)}")
-
-                            # Final update
-                            progress_bar.progress(100)
-                            status_text.text("Processing complete!")
-
-                            # Summary
-                            st.success(f"✅ Bulk upload complete. Successes: {successes}, Failures: {failures}")
-
-                            # Show detailed messages in an expander
-                            if messages:
-                                with st.expander("View Processing Details", expanded=(failures > 0)):
-                                    for msg in messages:
-                                        if "Failed" in msg or "Error" in msg:
-                                            st.error(msg)
-                                        else:
-                                            st.success(msg)
-
-                            # Offer to refresh the page
-                            if st.button("View Updated Student List"):
+                submitted = st.form_submit_button("Save Student")
+                if submitted:
+                    if not name_val.strip():
+                        st.error("❌ Name is required.")
+                    elif prog_val is None:
+                        st.error("❌ No valid program selected.")
+                    else:
+                        with st.spinner("Saving student information..."):
+                            result = store_student_record(
+                                name_val, phone_val, contact_val, prog_val,
+                                grade=grade_val, school=school_val
+                            )
+                            st.success(f"✅ {result}")
+                            if result != '':
                                 st.rerun()
+
+        else:
+            # Bulk CSV Upload
+            st.write("### Bulk Upload Students")
+
+            # Step 1: Select Program
+            st.markdown("#### 1️⃣ Select Program")
+            st.write("All students in the CSV will be assigned to this program:")
+
+            if is_admin:
+                all_progs = list_programs()
+                if not all_progs:
+                    st.warning("⚠️ No programs found in database.")
+                    st.stop()
+
+                prog_map = {p["program_id"]: p["program_name"] for p in all_progs}
+                selected_prog_id = st.selectbox(
+                    "Select Program for CSV Rows:",
+                    options=prog_map.keys(),
+                    format_func=lambda pid: f"{prog_map[pid]} (ID: {pid})",
+                    key="csv_upload_program_selector_admin"
+                )
+            else:
+                perm_ids = st.session_state.get("instructor_program_ids", [])
+                if not perm_ids:
+                    st.warning("⚠️ No assigned programs available.")
+                    st.stop()
+                selected_prog_id = st.selectbox(
+                    "Select Program for CSV Rows:",
+                    options=perm_ids,
+                    format_func=lambda pid: f"{prog_map.get(pid, f'Program ID: {pid}')}",
+                    key="csv_upload_program_selector"
+                )
+
+            # Step 2: Upload File
+            st.markdown("#### 2️⃣ Upload CSV File")
+            st.write("Upload a CSV file with student information:")
+
+            st.markdown("""
+            Need a template? Here's a sample CSV format:
+            ```
+            First Name,Last Name,Number,Email,Grade,School
+            John,Doe,555-123-4567,john.doe@email.com,10,Lincoln High
+            Jane,Smith,555-987-6543,jane.smith@email.com,11,Washington High
+            ```
+            """)
+
+            uploaded_file = st.file_uploader("Select a CSV file", type=["csv"])
+
+            if uploaded_file:
+                # Step 3: Preview and Process
+                st.markdown("#### 3️⃣ Preview and Process")
+
+                with st.spinner("Reading CSV data..."):
+                    df = pd.read_csv(uploaded_file)
+
+                # Preview in a clean format
+                st.write("Preview of first 5 rows:")
+                st.dataframe(df.head(), use_container_width=True)
+
+                # Check for required columns
+                required_cols = {"First Name", "Last Name", "Number", "Email", "Grade", "School"}
+                missing_cols = required_cols - set(df.columns)
+
+                if missing_cols:
+                    st.error(f"❌ CSV is missing required columns: {', '.join(missing_cols)}")
+                    st.info(f"Required columns are: {', '.join(required_cols)}")
+                else:
+                    total_rows = len(df)
+                    st.write(f"Total records to process: {total_rows}")
+
+                    if st.button("🔄 Process CSV Data"):
+                        progress_bar = st.progress(0)
+                        status_text = st.empty()
+
+                        successes = 0
+                        failures = 0
+                        messages = []
+
+                        for idx, row in df.iterrows():
+                            # Update progress
+                            progress = int((idx + 1) / total_rows * 100)
+                            progress_bar.progress(progress)
+                            status_text.text(f"Processing row {idx+1} of {total_rows}...")
+
+                            try:
+                                first_name = str(row["First Name"]).strip()
+                                last_name = str(row["Last Name"]).strip()
+                                name_val = f"{first_name} {last_name}".strip()
+
+                                phone_val = row["Number"]
+                                contact_val = row["Email"]
+                                grade_val = row["Grade"]
+                                school_val = row["School"]
+
+                                # Instructors can only upload if the CSV's program_id is in their assigned list
+                                if not is_admin:
+                                    perm_ids = st.session_state.get("instructor_program_ids", [])
+                                    if selected_prog_id not in perm_ids:
+                                        message = (f"Row {idx+1}: Program ID '{selected_prog_id}' "
+                                                    "is not in your assigned list.")
+                                        messages.append(message)
+                                        failures += 1
+                                        continue
+
+                                result_msg = store_student_record(
+                                    name_val, phone_val, contact_val,
+                                    selected_prog_id, grade_val, school_val
+                                )
+
+                                if ("New student record" in result_msg) or ("updated" in result_msg):
+                                    successes += 1
+                                    messages.append(f"Row {idx+1}: {result_msg}")
+                                else:
+                                    failures += 1
+                                    messages.append(f"Row {idx+1}: Failed - {result_msg}")
+
+                            except Exception as e:
+                                failures += 1
+                                messages.append(f"Row {idx+1}: Error - {str(e)}")
+
+                        # Final update
+                        progress_bar.progress(100)
+                        status_text.text("Processing complete!")
+
+                        # Summary
+                        st.success(f"✅ Bulk upload complete. Successes: {successes}, Failures: {failures}")
+
+                        # Show detailed messages in an expander
+                        if messages:
+                            with st.expander("View Processing Details", expanded=(failures > 0)):
+                                for msg in messages:
+                                    if "Failed" in msg or "Error" in msg:
+                                        st.error(msg)
+                                    else:
+                                        st.success(msg)
+
+                        # Offer to refresh the page
+                        if st.button("View Updated Student List"):
+                            st.rerun()
 
 
 def page_take_attendance():
@@ -3701,615 +3701,6 @@ def highlight_high_absences(row):
     else:
         return [""] * len(row)
 
-
-def page_generate_reports():
-    # -------------------------------------------------------------------------
-    # Page Header with Description
-    # -------------------------------------------------------------------------
-    st.header("📊 Attendance Reports & Analytics")
-    st.write("Generate insights, visualizations, and downloadable reports from attendance data.")
-    
-    # Progress indicator for initial data loading
-    with st.spinner("Loading attendance data..."):
-        # 1) Admin or Instructor check
-        is_admin = st.session_state.get("is_admin", False)
-        user_type = "Admin" if is_admin else "Instructor"
-        
-        # 2) Build program map from Postgres
-        all_programs = list_programs()  # e.g. [{"program_id":1,"program_name":"STEM"}, ...]
-        prog_map = {p["program_id"]: p["program_name"] for p in all_programs}
-        
-        # 3) Determine permitted program IDs
-        if is_admin:
-            program_id_options = [p["program_id"] for p in all_programs]  # admin sees all
-        else:
-            program_id_options = st.session_state.get("instructor_program_ids", [])
-            if not program_id_options:
-                st.warning("⚠️ You have no assigned programs. Contact an admin for access.")
-                return
-        
-        # 4) Fetch attendance records from Mongo
-        records = fetch_all_attendance_records()
-        if not records:
-            st.info("ℹ️ No attendance data found.")
-            return
-        
-        # 5) Filter by permitted program IDs
-        filtered_records = [r for r in records if r.get("program_id") in program_id_options]
-        if not filtered_records:
-            st.info("ℹ️ No attendance data found for your assigned programs.")
-            return
-        
-        # 6) Flatten records
-        flattened = []
-        for r in filtered_records:
-            att = r["attendance"]
-            pid = r.get("program_id", 0)
-            flattened.append({
-                "student_id": r.get("student_id"),
-                "name": r.get("name"),
-                "program_id": pid,
-                "program_name": prog_map.get(pid, f"Program ID={pid}"),
-                "date": att.get("date"),
-                "status": att.get("status"),
-                "comment": att.get("comment", "")
-            })
-        
-        if not flattened:
-            st.info("ℹ️ No valid attendance data to display.")
-            return
-        
-        df = pd.DataFrame(flattened)
-        if df.empty:
-            st.info("ℹ️ No valid attendance data to display.")
-            return
-
-    # Display data summary
-    st.success(f"✅ Loaded attendance data for {len(df['name'].unique())} students across {len(df['program_id'].unique())} programs.")
-    
-    # Create tabs for better organization
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Visualizations", "🔍 Data Explorer", "📑 Generate Reports", "🔄 Impact Assessment"])
-    
-    with tab1:
-        # -------------------------------------------------------------------------
-        # A) Admin-Only Visualizations (Overview)
-        # -------------------------------------------------------------------------
-        if is_admin:
-            st.subheader("📊 Admin Overview Dashboard")
-            st.write("These visualizations provide a high-level overview of attendance across all programs.")
-            
-            with st.expander("Admin Visualizations of Full Attendance Data", expanded=True):
-                def status_to_numeric(s):
-                    if s == "Present":
-                        return 1
-                    elif s == "Late":
-                        return 0.5
-                    else:
-                        return 0
-                
-                df["attendance_value"] = df["status"].apply(status_to_numeric)
-                
-                # Add a metric summary at the top
-                col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
-                with col_metrics1:
-                    avg_attendance = df["attendance_value"].mean() * 100
-                    st.metric("Overall Attendance Rate", f"{avg_attendance:.1f}%")
-                
-                with col_metrics2:
-                    present_rate = (df["status"] == "Present").mean() * 100
-                    st.metric("Present Rate", f"{present_rate:.1f}%")
-                
-                with col_metrics3:
-                    absent_rate = (df["status"] == "Absent").mean() * 100
-                    st.metric("Absence Rate", f"{absent_rate:.1f}%")
-                
-                # Ranking by average attendance
-                ranking_df = df.groupby("program_name", as_index=False)["attendance_value"].mean()
-                ranking_df.rename(columns={"attendance_value": "avg_attendance_score"}, inplace=True)
-                ranking_df.sort_values("avg_attendance_score", ascending=False, inplace=True)
-                
-                st.subheader("Program Ranking by Average Attendance")
-                st.dataframe(ranking_df.style.highlight_max(subset=["avg_attendance_score"]), use_container_width=True)
-                
-                # Bar chart: average attendance score
-                fig_bar = px.bar(
-                    ranking_df,
-                    x="program_name",
-                    y="avg_attendance_score",
-                    title="Average Attendance Score by Program",
-                    color="avg_attendance_score",
-                    color_continuous_scale="blues"
-                )
-                fig_bar.update_layout(xaxis_title="Program", yaxis_title="Average Attendance Score")
-                
-                # Pie chart: overall status distribution
-                status_counts = df["status"].value_counts().reset_index()
-                status_counts.columns = ["status", "count"]
-                fig_pie = px.pie(
-                    status_counts,
-                    values="count",
-                    names="status",
-                    title="Distribution of Attendance Statuses",
-                    hole=0.4,
-                    color="status",
-                    color_discrete_map={
-                        "Present": "#28a745", 
-                        "Late": "#ffc107", 
-                        "Absent": "#dc3545", 
-                        "Excused": "#6c757d"
-                    }
-                )
-                
-                # Time-series
-                df["date"] = pd.to_datetime(df["date"], errors="coerce")
-                daily_df = df.groupby("date", as_index=False)["attendance_value"].mean()
-                fig_line = px.line(
-                    daily_df,
-                    x="date",
-                    y="attendance_value",
-                    title="Average Attendance Over Time (All Programs)",
-                    markers=True
-                )
-                fig_line.update_layout(xaxis_title="Date", yaxis_title="Attendance Score")
-                
-                # Multi-line by program
-                multi_df = df.groupby(["date", "program_name"], as_index=False)["attendance_value"].mean()
-                fig_multi = px.line(
-                    multi_df,
-                    x="date",
-                    y="attendance_value",
-                    color="program_name",
-                    title="Attendance Over Time by Program",
-                    markers=True
-                )
-                fig_multi.update_layout(xaxis_title="Date", yaxis_title="Attendance Score", legend_title="Program")
-                
-                colA, colB = st.columns(2)
-                with colA:
-                    st.plotly_chart(fig_bar, use_container_width=True)
-                
-                with colB:
-                    st.plotly_chart(fig_pie, use_container_width=True)
-                
-                st.write("---")
-                
-                st.plotly_chart(fig_line, use_container_width=True)
-                st.plotly_chart(fig_multi, use_container_width=True)
-                
-                # Download buttons for visualizations
-                st.download_button(
-                    label="📥 Download Attendance Summary CSV",
-                    data=ranking_df.to_csv(index=False).encode('utf-8'),
-                    file_name="attendance_summary.csv",
-                    mime="text/csv"
-                )
-        else:
-            # For instructors, show a simpler view
-            st.subheader("📊 Attendance Overview")
-            # Get instructor's programs
-            instructor_programs = [prog_map.get(pid, f"Program {pid}") for pid in program_id_options]
-            st.write(f"You have access to the following programs: {', '.join(instructor_programs)}")
-            
-            # Simple metrics for instructor
-            instructor_df = df.copy()
-            
-            def status_to_numeric(s):
-                if s == "Present":
-                    return 1
-                elif s == "Late":
-                    return 0.5
-                else:
-                    return 0
-            
-            instructor_df["attendance_value"] = instructor_df["status"].apply(status_to_numeric)
-            
-            # Add metrics
-            col_metrics1, col_metrics2, col_metrics3 = st.columns(3)
-            with col_metrics1:
-                avg_attendance = instructor_df["attendance_value"].mean() * 100
-                st.metric("Overall Attendance Rate", f"{avg_attendance:.1f}%")
-            
-            with col_metrics2:
-                present_rate = (instructor_df["status"] == "Present").mean() * 100
-                st.metric("Present Rate", f"{present_rate:.1f}%")
-            
-            with col_metrics3:
-                absent_rate = (instructor_df["status"] == "Absent").mean() * 100
-                st.metric("Absence Rate", f"{absent_rate:.1f}%")
-            
-            # Simple charts for instructor
-            status_counts = instructor_df["status"].value_counts().reset_index()
-            status_counts.columns = ["status", "count"]
-            fig_pie = px.pie(
-                status_counts,
-                values="count",
-                names="status",
-                title="Distribution of Attendance Statuses",
-                hole=0.4,
-                color="status",
-                color_discrete_map={
-                    "Present": "#28a745", 
-                    "Late": "#ffc107", 
-                    "Absent": "#dc3545", 
-                    "Excused": "#6c757d"
-                }
-            )
-            st.plotly_chart(fig_pie, use_container_width=True)
-    
-    with tab2:
-        # -------------------------------------------------------------------------
-        # B) Data Explorer + Chart Building from Filtered Data
-        # -------------------------------------------------------------------------
-        st.subheader("🔍 Data Explorer & Custom Charts")
-        st.write("Filter and visualize attendance data using various criteria.")
-        
-        with st.expander("How to use the Data Explorer", expanded=False):
-            st.write("""
-            1. Use the filter controls below to select specific data
-            2. The table will update to show only matching records
-            3. Choose a chart type to visualize the filtered data
-            4. The chart will update automatically based on your selection
-            """)
-        
-        explorer_output = dataframe_explorer(df, case=False)
-        explorer_df = pd.DataFrame(explorer_output)
-        
-        if explorer_df.empty:
-            st.info("ℹ️ No data matches your filter criteria. Try adjusting the filters.")
-        else:
-            st.write(f"**Showing {len(explorer_df)} records that match your criteria**")
-            st.dataframe(explorer_df, use_container_width=True)
-            
-            # Add download button for filtered data
-            st.download_button(
-                label="📥 Download Filtered Data CSV",
-                data=explorer_df.to_csv(index=False).encode('utf-8'),
-                file_name="filtered_attendance_data.csv",
-                mime="text/csv"
-            )
-            
-            st.markdown("### 📈 Build a Custom Chart")
-            st.write("Create visualizations from your filtered data")
-            
-            chart_type = st.selectbox(
-                "Select Chart Type",
-                [
-                    "Bar - Status Counts",
-                    "Line - Attendance Over Time",
-                    "Bar - Student Attendance",
-                    "Pie - Status Distribution",
-                ],
-                help="Choose the type of chart you want to create from your filtered data"
-            )
-            
-            # Convert 'date' to datetime if needed
-            explorer_df["date"] = pd.to_datetime(explorer_df["date"], errors="coerce")
-            
-            # Chart container with loading indicator
-            chart_container = st.container()
-            with chart_container:
-                with st.spinner("Generating chart..."):
-                    if chart_type == "Bar - Status Counts":
-                        status_counts = explorer_df["status"].value_counts().reset_index()
-                        status_counts.columns = ["status", "count"]
-                        fig_bar_filter = px.bar(
-                            status_counts,
-                            x="status",
-                            y="count",
-                            title="Status Counts in Filtered Data",
-                            color="status",
-                            color_discrete_map={
-                                "Present": "#28a745", 
-                                "Late": "#ffc107", 
-                                "Absent": "#dc3545", 
-                                "Excused": "#6c757d"
-                            }
-                        )
-                        st.plotly_chart(fig_bar_filter, use_container_width=True)
-                    
-                    elif chart_type == "Line - Attendance Over Time":
-                        def status_to_numeric(s):
-                            if s == "Present":
-                                return 1
-                            elif s == "Late":
-                                return 0.5
-                            else:
-                                return 0
-                        explorer_df["attendance_value"] = explorer_df["status"].apply(status_to_numeric)
-                        daily_mean = explorer_df.groupby("date", as_index=False)["attendance_value"].mean().sort_values("date")
-                        fig_line_filter = px.line(
-                            daily_mean,
-                            x="date",
-                            y="attendance_value",
-                            title="Average Attendance Over Time (Filtered Data)",
-                            markers=True
-                        )
-                        fig_line_filter.update_layout(xaxis_title="Date", yaxis_title="Attendance Score")
-                        st.plotly_chart(fig_line_filter, use_container_width=True)
-                    
-                    elif chart_type == "Bar - Student Attendance":
-                        group_data = explorer_df.groupby(["name", "status"]).size().reset_index(name="count")
-                        fig_bar_student = px.bar(
-                            group_data,
-                            x="name",
-                            y="count",
-                            color="status",
-                            barmode="group",
-                            title="Attendance by Student (Filtered Data)",
-                            color_discrete_map={
-                                "Present": "#28a745", 
-                                "Late": "#ffc107", 
-                                "Absent": "#dc3545", 
-                                "Excused": "#6c757d"
-                            }
-                        )
-                        fig_bar_student.update_layout(xaxis_title="Student Name", yaxis_title="Count")
-                        st.plotly_chart(fig_bar_student, use_container_width=True)
-                    
-                    elif chart_type == "Pie - Status Distribution":
-                        status_counts = explorer_df["status"].value_counts().reset_index()
-                        status_counts.columns = ["status", "count"]
-                        fig_pie_filter = px.pie(
-                            status_counts,
-                            values="count",
-                            names="status",
-                            title="Status Distribution (Filtered Data)",
-                            hole=0.4,
-                            color="status",
-                            color_discrete_map={
-                                "Present": "#28a745", 
-                                "Late": "#ffc107", 
-                                "Absent": "#dc3545", 
-                                "Excused": "#6c757d"
-                            }
-                        )
-                        st.plotly_chart(fig_pie_filter, use_container_width=True)
-    
-    with tab3:
-        # -------------------------------------------------------------------------
-        # C) Program-Specific XLSX (with advanced insights)
-        # -------------------------------------------------------------------------
-        st.subheader("📑 Attendance Report Generator")
-        st.write("Create detailed attendance reports with insights and export to Excel.")
-        
-        # Instructions expander
-        with st.expander("How to Create Reports", expanded=False):
-            st.write("""
-            1. Select a program from the dropdown
-            2. Click "Create Pivot + Insights" to generate the report
-            3. Review the report summary and pivot table
-            4. Click "Create Downloadable XLSX" to download the Excel file
-            """)
-        
-        # Program selection card
-        st.markdown("### 1️⃣ Select Program")
-        
-        # Let user pick a program from df
-        selectable_pids = sorted(df["program_id"].unique())
-        selected_pid = st.selectbox(
-            "Select a Program to Export/Analyze",
-            options=selectable_pids,
-            format_func=lambda pid: prog_map.get(pid, f"Program ID={pid}"),
-            help="Choose which program's attendance data to analyze"
-        )
-        
-        # Initialize session state for pivot data
-        if "pivot_df" not in st.session_state:
-            st.session_state["pivot_df"] = None
-        
-        # Create a nice card-like container for the report generation button
-        st.markdown("### 2️⃣ Generate Report")
-        
-        if st.button("🔄 Create Pivot + Insights", help="Click to generate the attendance report"):
-            with st.spinner("Generating report..."):
-                # Filter DF to chosen program
-                sub_df = df[df["program_id"] == selected_pid].copy()
-                if sub_df.empty:
-                    st.warning("⚠️ No attendance data for that program!")
-                    return
-                
-                program_name = prog_map.get(selected_pid, f"Program ID={selected_pid}")
-                st.session_state["selected_program_name"] = program_name
-                
-                sub_df["date"] = pd.to_datetime(sub_df["date"], errors="coerce").dt.date
-                pivot_df = sub_df.pivot(index="name", columns="date", values="status").fillna("Missed")
-                
-                # Count absences
-                def count_absences(row):
-                    return sum(x in ["Absent", "Missed"] for x in row)
-                pivot_df["Total Absences"] = pivot_df.apply(count_absences, axis=1)
-                
-                date_columns = [col for col in pivot_df.columns if col != "Total Absences"]
-                # Create new column order with "Total Absences" as the second column
-                new_column_order = ["Total Absences", date_columns[0]] + date_columns[1:]
-                # Reindex the DataFrame with the new column order
-                pivot_df = pivot_df[new_column_order]
-                st.session_state["pivot_df"] = pivot_df
-                
-                # Success message after report generation
-                st.success(f"✅ Report generated successfully for {program_name}")
-        
-        # Only show insights if pivot data exists
-        if st.session_state["pivot_df"] is not None:
-            st.markdown("### 3️⃣ Report Summary")
-            
-            # Get program name from session state
-            program_name = st.session_state.get("selected_program_name", "Selected Program")
-            
-            pivot_df = st.session_state["pivot_df"]
-            
-            # ---- Additional Summaries/Insights ----
-            total_students = len(pivot_df.index)
-            average_absences = pivot_df["Total Absences"].mean()
-            max_absences = pivot_df["Total Absences"].max()
-            
-            # Use columns for a nicer layout of metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Program", program_name)
-            with col2:
-                st.metric("Total Students", total_students)
-            with col3:
-                st.metric("Avg. Absences", f"{average_absences:.2f}")
-            
-            # "High-risk" threshold with a visual indicator
-            absence_threshold = 3
-            high_risk_count = len(pivot_df[pivot_df["Total Absences"] > absence_threshold])
-            
-            # Progress bar to visualize attendance health
-            if high_risk_count > 0:
-                risk_percent = (high_risk_count / total_students) * 100
-                st.warning(f"⚠️ {high_risk_count} of {total_students} students ({risk_percent:.1f}%) have excessive absences")
-                
-                # Show detailed high risk information
-                high_risk_students = pivot_df[pivot_df["Total Absences"] > absence_threshold].index.tolist()
-                with st.expander(f"View {high_risk_count} Students with Excessive Absences", expanded=True):
-                    for s in high_risk_students:
-                        st.write(f"- **{s}**: {pivot_df.loc[s, 'Total Absences']} absences")
-            else:
-                st.success(f"✅ No students have more than {absence_threshold} absences. Great job!")
-            
-            st.markdown("### 4️⃣ Attendance Pivot Table")
-            st.write("The table below shows attendance status for each student by date, with high absence counts highlighted in red.")
-            
-            # highlight rows above threshold
-            pivot_styled = st.session_state["pivot_df"].style.apply(
-                highlight_high_absences, axis=1
-            )
-            st.dataframe(pivot_styled, use_container_width=True)
-            
-            # Add a nice download button with icon
-            excel_button_container = st.container()
-            with excel_button_container:
-                download_col1, download_col2 = st.columns([3, 1])
-                with download_col1:
-                    st.markdown("### 5️⃣ Export Report")
-                    st.write("Download the complete report as an Excel file.")
-                
-                with download_col2:
-                    if st.button("📥 Create XLSX", help="Generate an Excel file with the attendance data"):
-                        with st.spinner("Creating Excel file..."):
-                            output = io.BytesIO()
-                            with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-                                st.session_state["pivot_df"].to_excel(writer, sheet_name="Attendance Pivot")
-                                
-                                workbook = writer.book
-                                worksheet = writer.sheets["Attendance Pivot"]
-                                red_format = workbook.add_format({"font_color": "red"})
-                                row_count, col_count = st.session_state["pivot_df"].shape
-                                worksheet.conditional_format(
-                                    1, 1, row_count, col_count,
-                                    {
-                                        "type": "text",
-                                        "criteria": "containing",
-                                        "value": "Missed",
-                                        "format": red_format
-                                    }
-                                )
-                                
-                                # Add a summary sheet
-                                summary_df = pd.DataFrame({
-                                    "Metric": ["Program", "Total Students", "Average Absences", "Max Absences", "Students with Excessive Absences"],
-                                    "Value": [
-                                        program_name, 
-                                        total_students, 
-                                        f"{average_absences:.2f}", 
-                                        max_absences,
-                                        high_risk_count
-                                    ]
-                                })
-                                summary_df.to_excel(writer, sheet_name="Summary", index=False)
-                            
-                            excel_data = output.getvalue()
-                            
-                            file_name = f"{program_name.replace(' ', '_').lower()}_attendance.xlsx"
-                            st.download_button(
-                                label="💾 Download Excel Report",
-                                data=excel_data,
-                                file_name=file_name,
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
-                            
-                            st.success("✅ Excel file created successfully!")
-    with tab4:
-        st.subheader("🔄 Nonprofit Program Impact Assessment")
-        st.write("Generate professional impact assessment reports for your nonprofit programs and initiatives.")
-        
-        # Get the prompts dictionary
-        prompts_dict = get_nonprofit_prompts()
-        
-        # Create the input area
-        if 'nonprofit_project_description' not in st.session_state:
-            default_text = """
-            Describe your program's primary objectives, the communities served, and intended impact areas.
-            Example: "Our youth mentorship program aims to improve academic outcomes and life skills for underserved high school students in our community through weekly mentoring sessions, workshops, and college preparation assistance."
-            """
-            st.session_state['nonprofit_project_description'] = default_text
-
-        project_description = st.text_area(
-            "Provide a brief overview of your program:",
-            value=st.session_state['nonprofit_project_description'],
-            height=120,
-            max_chars=500,
-            help="Describe your program's objectives, target participants, and desired outcomes"
-        )
-        
-        # Analysis method selection
-        st.write("### Choose an Impact Measurement Approach:")
-        
-        selected_approach = st.radio(
-            "Select the most relevant analysis method:",
-            options=list(prompts_dict.keys()),
-            horizontal=False,
-            help="Each approach focuses on different aspects of nonprofit impact measurement"
-        )
-        
-        # Display the explanation for the selected approach
-        with st.expander("Understanding this approach", expanded=True):
-            st.info(prompts_dict[selected_approach])
-        
-        # Generate report button
-        if st.button("🔄 Generate Impact Assessment Report", use_container_width=True):
-            if project_description.strip() == "" or project_description == st.session_state['nonprofit_project_description']:
-                st.warning("Please provide a description of your specific program before generating a report.")
-            else:
-                st.session_state['nonprofit_project_description'] = project_description
-                
-                with st.spinner("Generating your impact assessment report..."):
-                    report_content = generate_ai_enhanced_report(project_description, selected_approach)
-                    
-                    if report_content:
-                        st.success("✅ Impact assessment report generated successfully!")
-                        
-                        # Display the generated report in a nice format
-                        st.markdown("### 📋 Program Impact Assessment Report")
-                        st.markdown(f"**Analysis Method:** {selected_approach}")
-                        
-                        with st.expander("View Full Report", expanded=True):
-                            st.markdown(report_content)
-                        
-                        # Create download options
-                        # 1. Plain text
-                        st.download_button(
-                            label="📄 Download as Text",
-                            data=report_content,
-                            file_name=f"impact_assessment_{selected_approach.split()[0].lower()}.txt",
-                            mime="text/plain"
-                        )
-                        
-                        # 2. Create formatted PDF content
-                        pdf_content = f"""# Program Impact Assessment Report
-                        ## Analysis Method: {selected_approach}
-
-                        {report_content}
-
-                        ---
-                        Generated by Club Stride Impact Assessment Tool
-                        Date: {datetime.now().strftime('%Y-%m-%d')}
-                            """
-                                                    
-
-
 def display_document_sending_form(is_admin):
     """Display the form for sending a document to recipients."""
     st.subheader("📤 Send Document")
@@ -5955,7 +5346,7 @@ def page_generate_reports():
     st.success(f"✅ Loaded attendance data for {len(df['name'].unique())} students across {len(df['program_id'].unique())} programs.")
     
     # Create tabs for better organization - REMOVED THE 4th TAB
-    tab1, tab2, tab3 = st.tabs(["📈 Visualizations", "🔍 Data Explorer", "📑 Generate Reports"])
+    tab1, tab2, tab3 = st.tabs(["📈 Visualizations", "🔍 Data Explorer", "📑 Program Report Generator"])
     
     with tab1:
         # [TAB 1 CONTENT UNCHANGED]
@@ -6258,7 +5649,7 @@ def page_generate_reports():
         # -------------------------------------------------------------------------
         # C) Program-Specific XLSX (with advanced insights)
         # -------------------------------------------------------------------------
-        st.subheader("📑 Attendance Report Generator")
+        st.subheader("📑 Program Attendance Report Generator")
         st.write("Create detailed attendance reports with insights and export to Excel.")
         
         # Instructions expander
@@ -6289,7 +5680,6 @@ def page_generate_reports():
         
         # Create a nice card-like container for the report generation button
         st.markdown("### 2️⃣ Generate Report")
-        
         if st.button("🔄 Create Pivot + Insights", help="Click to generate the attendance report"):
             with st.spinner("Generating report..."):
                 # Filter DF to chosen program
