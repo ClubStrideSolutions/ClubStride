@@ -48,197 +48,310 @@ from instructors_db import create_instructors_table #authenticate_instructor, li
 
 def main():
     st.set_page_config(layout='wide', page_title='Club Stride Software')
-     # 1) Global HTML snippet with a top banner and some styling
-    global_layout_html = """
-    <div style="background: linear-gradient(90deg, #8A4FFF 0%, #EC4899 40%, #FF8A00 100%);
-                padding: 20px; color: white; text-align: center;
-                font-family: 'Open Sans', sans-serif;">
-      <h1>Club Stride Attendance System</h1>
-    </div>
-    """
-
-
-
-    # 2) Inject the HTML using st.components.v1.html
-    #    Note: scrolling=False means we rely on the main page scroll, not an iframe scroll
-    components.html(global_layout_html, height=150, scrolling=False)
-
-    # Medium layout hack
-    medium_layout_css = """
-    <style>
-    @media (min-width: 700px) {
-        .main .block-container {
-            max-width: 900px !important;  /* Adjust as desired (e.g., 1000px) */
-            margin: 0 auto;              /* Center horizontally */
-        }
-    }
-    </style>
-    """
-    st.markdown(medium_layout_css, unsafe_allow_html=True)
-
-    # Advanced React-like CSS
     advanced_react_css = """
-    <style>
-    /************************************************
-     0) IMPORT FONTS & GLOBAL RESETS
-    ************************************************/
-    @import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600&display=swap');
+        <style>
+        /************************************************
+        0) IMPORT FONTS & GLOBAL RESETS
+        ************************************************/
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-    html, body, [class*="css"] {
-        font-family: 'Open Sans', sans-serif;
-        margin: 0;
-        padding: 0;
-        scroll-behavior: smooth;
-        transition: all 0.3s ease-in-out;
-    }
-    table, th, td {
-    font-family: 'Open Sans', sans-serif; /* Ensure table text is consistent */
-    }
-    body {
-        background-color: #FFFFFF !important;  /* White main area */
-        color: #374151; /* Dark gray text color */
-    }
-
-    /************************************************
-     1) MAIN CONTENT FADE-SLIDE IN
-    ************************************************/
-    .main .block-container {
-        animation: fadeSlideIn 0.4s ease-out both;
-        padding-top: 1rem !important;
-        padding-bottom: 1rem !important;
-    }
-    @keyframes fadeSlideIn {
-        0% {
-            opacity: 0;
-            transform: translateY(15px);
+        html, body, [class*="css"] {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            scroll-behavior: smooth;
+            transition: all 0.3s ease-in-out;
         }
-        100% {
-            opacity: 1;
-            transform: translateY(0);
+        table, th, td {
+            font-family: 'Inter', sans-serif; /* Consistent table text */
         }
-    }
+        body {
+            background-color: #FFFFFF !important;
+            color: #1F2937; /* Darker text for better contrast */
+        }
 
-    /************************************************
-     2) WIDE SIDEBAR WITH OPENAI-STYLE GRADIENT
-    ************************************************/
-    [data-testid="stSidebar"] {
-        width: 300px !important;
-        min-width: 300px !important;
-        background: linear-gradient(90deg, #8A4FFF 0%, #EC4899 40%, #FF8A00 100%) !important;
-    
-        box-shadow: 1px 0 4px rgba(0, 0, 0, 0.1);
-        border-right: 1px solid rgba(255,255,255,0.2);
-        transition: all 0.3s ease-in-out;
-    }
-    
-    [data-testid="stSidebar"]:hover {
-        filter: brightness(1.03);
-    }
+        /************************************************
+        1) MAIN CONTENT FADE-SLIDE IN
+        ************************************************/
+        .main .block-container {
+            animation: fadeSlideIn 0.5s ease-out both;
+            padding-top: 1.5rem !important;
+            padding-bottom: 1.5rem !important;
+            max-width: 1200px; /* Wider content area */
+        }
+        @keyframes fadeSlideIn {
+            0% {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            100% {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
 
-    /************************************************
-     3) MOBILE RESPONSIVENESS
-    ************************************************/
-    @media only screen and (max-width: 600px) {
+        /************************************************
+        2) MODERN BLACK SIDEBAR WITH SUBTLE ACCENT
+        ************************************************/
         [data-testid="stSidebar"] {
-            position: relative !important;
-            width: 100% !important;
-            min-width: 100% !important;
-            border-right: none;
-            box-shadow: none;
+            width: 300px !important;
+            min-width: 300px !important;
+            background: #111827 !important; /* Dark, almost black background */
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.2);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            overflow: hidden; /* For the accent line */
         }
-    }
 
-    /************************************************
-     4) SCROLLBARS (PURPLE THUMB)
-    ************************************************/
-    ::-webkit-scrollbar {
-        width: 8px;
-    }
-    ::-webkit-scrollbar-track {
-        background: #D1D5DB;
-    }
-    ::-webkit-scrollbar-thumb {
-        background-color: #8B5CF6;
-        border-radius: 8px;
-        border: 1px solid #D1D5DB;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-        background-color: #6D28D9;
-    }
-
-    /************************************************
-     5) BUTTONS & INTERACTIVE WIDGETS
-      background: linear-gradient(90deg, #8A4FFF, #EC4899);
-
-    ************************************************/
-    .stButton button, div[role="button"] {
-        background: #FFFFFF !important;
-       
-        color: #374151 !important;
-        border: none !important;
-        border-radius: 4px !important;
-        box-shadow: 0 3px 6px rgba(0,0,0,0.1) !important;
-        transition: all 0.2s ease;
-        font-weight: 600 !important;
-    }
-    .stButton button:hover, div[role="button"]:hover {
-        background: #F3F4F6 !important;
-        transform: translateY(-1px);
-        box-shadow: 0 5px 10px rgba(0,0,0,0.15) !important;
-    }
-    .stButton button:active, div[role="button"]:active {
-        transform: scale(0.98);
-    }
-    [role="slider"] {
-        background-color: #8B5CF6 !important;
-        box-shadow: none !important;
-    }
-    input[type="checkbox"], input[type="radio"] {
-        accent-color: #8B5CF6 !important;
-        transform: scale(1.1);
-        cursor: pointer;
-    }
-
-    /************************************************
-     6) HEADERS, TABLES, TEXT SELECTION
-    ************************************************/
-    ::selection {
-        background: #8B5CF6;
-        color: #FFFFFF;
-    }
-    table, th, td {
-        transition: background-color 0.2s;
-    }
-    tbody tr:hover {
-        background-color: rgba(139, 92, 246, 0.05);
-    }
-    h1, h2, h3 {
-        margin-top: 1rem;
-        margin-bottom: 0.5rem;
-        color: #2D3748;
-    }
-
-    /************************************************
-     7) EXPANDER ANIMATION
-    ************************************************/
-    .st-expanderContent {
-        animation: expandIn 0.3s ease-in-out;
-        transform-origin: top;
-    }
-    @keyframes expandIn {
-        0% {
-            max-height: 0;
-            opacity: 0;
+        /* Modern accent line on the side */
+        [data-testid="stSidebar"]::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: linear-gradient(180deg, #8A4FFF 0%, #EC4899 50%, #FF8A00 100%);
+            opacity: 0.8;
         }
-        100% {
-            max-height: 999px;
-            opacity: 1;
+
+        /* Brighten sidebar content for better contrast */
+        [data-testid="stSidebar"] .sidebar-content {
+            color: #F3F4F6 !important;
         }
-    }
-    </style>
-    """
+
+        /* Sidebar hover effect */
+        [data-testid="stSidebar"]:hover {
+            filter: brightness(1.05);
+        }
+
+        /************************************************
+        3) TITLE STYLING
+        ************************************************/
+        .title-container {
+            text-align: center;
+            padding: 20px 0;
+        }
+        h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: white;
+            margin: 0;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        /************************************************
+        4) MOBILE RESPONSIVENESS
+        ************************************************/
+        @media only screen and (max-width: 768px) {
+            [data-testid="stSidebar"] {
+                width: 100% !important;
+                min-width: 100% !important;
+                border-right: none;
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+            }
+            
+            [data-testid="stSidebar"]::after {
+                width: 100%;
+                height: 4px;
+                top: 0;
+                left: 0;
+            }
+            
+            .main .block-container {
+                padding: 1rem !important;
+            }
+        }
+
+        /************************************************
+        5) SCROLLBARS (SLEEK DESIGN)
+        ************************************************/
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #F1F1F1;
+            border-radius: 6px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background-color: #111827;
+            border-radius: 6px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background-color: #374151;
+        }
+
+        /************************************************
+        6) BUTTONS & INTERACTIVE WIDGETS
+        ************************************************/
+        .stButton button, div[role="button"] {
+            background: #111827 !important;
+            color: #FFFFFF !important;
+            border: none !important;
+            border-radius: 6px !important;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1) !important;
+            transition: all 0.2s ease;
+            font-weight: 600 !important;
+            padding: 0.5rem 1rem !important;
+        }
+        .stButton button:hover, div[role="button"]:hover {
+            background: #374151 !important;
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.15) !important;
+        }
+        .stButton button:active, div[role="button"]:active {
+            transform: scale(0.98);
+        }
+
+        /* Form controls */
+        [role="slider"] {
+            background-color: #111827 !important;
+            box-shadow: none !important;
+        }
+        input[type="checkbox"], input[type="radio"] {
+            accent-color: #111827 !important;
+            transform: scale(1.1);
+            cursor: pointer;
+        }
+
+        /* Input fields */
+        .stTextInput input, .stNumberInput input, .stDateInput input, .stTimeInput input {
+            border-radius: 6px !important;
+            border: 1px solid #D1D5DB !important;
+            padding: 0.5rem !important;
+            transition: all 0.2s ease;
+        }
+        .stTextInput input:focus, .stNumberInput input:focus, .stDateInput input:focus, .stTimeInput input:focus {
+            border-color: #111827 !important;
+            box-shadow: 0 0 0 2px rgba(17, 24, 39, 0.2) !important;
+        }
+
+        /************************************************
+        7) HEADERS, TABLES, TEXT SELECTION
+        ************************************************/
+        ::selection {
+            background: #111827;
+            color: #FFFFFF;
+        }
+
+        /* Table styling */
+        table {
+            border-collapse: separate !important;
+            border-spacing: 0 !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05) !important;
+        }
+        th {
+            background-color: #F9FAFB !important;
+            color: #111827 !important;
+            font-weight: 600 !important;
+            text-transform: uppercase !important;
+            font-size: 0.85rem !important;
+            letter-spacing: 0.5px !important;
+        }
+        tbody tr:nth-child(even) {
+            background-color: #F3F4F6;
+        }
+        tbody tr:hover {
+            background-color: rgba(17, 24, 39, 0.05);
+        }
+
+        /* Headers */
+        h1, h2, h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            color: #111827;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+        h1 {
+            font-size: 2rem;
+            border-bottom: 2px solid #F3F4F6;
+            padding-bottom: 0.5rem;
+        }
+        h2 {
+            font-size: 1.5rem;
+        }
+        h3 {
+            font-size: 1.25rem;
+            color: #374151;
+        }
+
+        /************************************************
+        8) EXPANDER & CARD ANIMATIONS
+        ************************************************/
+        .st-expanderContent {
+            animation: expandIn 0.3s ease-in-out;
+            transform-origin: top;
+            border-radius: 0 0 8px 8px;
+        }
+        @keyframes expandIn {
+            0% {
+                max-height: 0;
+                opacity: 0;
+            }
+            100% {
+                max-height: 999px;
+                opacity: 1;
+            }
+        }
+
+        /* Card-like elements */
+        .element-container, .stAlert {
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            transition: all 0.3s ease;
+        }
+        .element-container:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.05);
+        }
+
+        /************************************************
+        9) CUSTOM TITLE COMPONENT
+        ************************************************/
+        .custom-title {
+            background-color: #111827;
+            padding: 1.5rem;
+            border-radius: 0 0 12px 12px;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+            position: relative;
+            overflow: hidden;
+        }
+        .custom-title h1 {
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin: 0;
+            padding: 0;
+            border: none;
+            text-transform: uppercase;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+        .custom-title::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            left: 25%;
+            right: 25%;
+            height: 3px;
+            background: linear-gradient(90deg, #8A4FFF, #EC4899, #FF8A00);
+            border-radius: 3px 3px 0 0;
+        }
+        </style>
+
+        <!-- Title Component HTML -->
+        <div class="custom-title">
+        <h1>Club Stride Attendance System</h1>
+        </div>
+        """
+    # components.html(advanced_react_css)
     st.markdown(advanced_react_css, unsafe_allow_html=True)
-
     # Hide Streamlit footer & menu
     hide_footer_style = ''' <style>.reportview-container .main footer {visibility: hidden;} </style>'''
     st.markdown(hide_footer_style, unsafe_allow_html=True)
