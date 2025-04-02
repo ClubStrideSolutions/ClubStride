@@ -2117,6 +2117,8 @@ def page_take_attendance():
             selected_prog_id = st.selectbox(
                 "Filter by Program:",
                 options=[pc[0] for pc in program_choices],
+                key="attendance_program_selector",  # Add a unique key here
+
                 format_func=lambda pid: "All My Programs" if pid is None else f"{prog_map.get(pid, f'Program ID: {pid}')}",
                 help="Select a specific program or view all your assigned programs"
             )
