@@ -13,6 +13,11 @@ python-dateutil
 mailersend
 plotly
 xlsxwriter
-openai
+# openai
 # langchain_core
-# langchain_openai
+# langchain
+# langchain_community
+# # langchain_openai
+# unstructured
+# python-docx
+PyPDF2

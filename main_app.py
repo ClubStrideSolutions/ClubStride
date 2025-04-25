@@ -10,7 +10,7 @@ from pages import (
     page_manage_instructors,
     page_manage_students,
     page_take_attendance,
-    page_manage_documents,
+    # page_manage_documents,
     page_review_attendance,
     page_generate_reports,
     page_help,
@@ -522,6 +522,8 @@ def main():
         # with col2:
         st.divider()
         st.image(logo, caption="© 2025 Club Stride Inc", use_container_width=True)
+        st.divider()
+        st.write("https://clubstride.org")
     st.session_state.menu_choice = choice
 
     # -----------------------------
