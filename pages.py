@@ -7,8 +7,8 @@ from datetime import datetime, time, date, timedelta
 from dateutil import parser
 import plotly.express as px
 from pathlib import Path
-import openai
-from openai import OpenAI
+# import openai
+# from openai import OpenAI
 import pandas as pd
 import io, os
 from collections import Counter
